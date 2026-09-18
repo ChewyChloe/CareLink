@@ -1,0 +1,65 @@
+:root {
+  /* Tender Bloom Design System Palette */
+  --cl-bg: #fbf9f5;
+  --cl-surface: #ffffff;
+  --cl-surface-soft: #f5f3ef;
+  --cl-surface-container: #efeeea;
+  --cl-surface-container-high: #eae8e4;
+  --cl-surface-container-highest: #e4e2de;
+  --cl-surface-dim: #dbdad6;
+  
+  --cl-text: #1b1c1a;
+  --cl-text-secondary: #574143;
+  --cl-text-muted: #8a7173;
+  --cl-border: rgba(222, 191, 193, 0.45);
+  --cl-border-subtle: #eae8e4;
+
+  --cl-primary: #a93349;
+  --cl-primary-hover: #891933;
+  --cl-primary-container: #fb7185;
+  --cl-primary-soft: #ffdadc;
+  --cl-on-primary: #ffffff;
+  --cl-on-primary-container: #6f0122;
+
+  --cl-secondary: #855316;
+  --cl-secondary-container: #ffbc76;
+  --cl-secondary-soft: #ffdcbd;
+  --cl-on-secondary: #ffffff;
+  --cl-on-secondary-container: #79490b;
+
+  --cl-tertiary: #00668a;
+  --cl-tertiary-container: #04a9e3;
+  --cl-tertiary-soft: #c4e7ff;
+  --cl-on-tertiary: #ffffff;
+  --cl-on-tertiary-container: #003950;
+
+  --cl-danger: #ba1a1a;
+  --cl-danger-soft: #ffdad6;
+  --cl-warning: #855316;
+  --cl-warning-soft: #ffdcbd;
+
+  --cl-radius-sm: 8px;
+  --cl-radius-md: 12px;
+  --cl-radius-lg: 16px;
+  --cl-radius-xl: 24px;
+  --cl-radius-pill: 9999px;
+
+  --cl-space-1: 4px;
+  --cl-space-2: 8px;
+  --cl-space-3: 12px;
+  --cl-space-4: 16px;
+  --cl-space-6: 24px;
+  --cl-space-8: 32px;
+
+  --cl-display: 1.875rem; /* 30px */
+  --cl-title: 1.375rem;   /* 22px */
+  --cl-subtitle: 1.125rem;/* 18px */
+  --cl-body: 0.9375rem;   /* 15px */
+  --cl-caption: 0.8125rem;/* 13px */
+  --cl-label-sm: 0.6875rem;/* 11px */
+
+  --cl-font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --cl-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --cl-shadow-card: 0 4px 20px -2px rgba(251, 113, 133, 0.06), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
+  --cl-shadow-hover: 0 10px 25px -3px rgba(251, 113, 133, 0.12), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+}

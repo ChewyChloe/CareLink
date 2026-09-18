@@ -1,0 +1,597 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+// -----------------------------------------------------------------------------
+// 1. 身份與授權 (Identity & Access)
+// -----------------------------------------------------------------------------
+
+model User {
+  id                        String      @id @default(uuid()) @db.Uuid
+  line_provider_id          String
+  line_sub                  String
+  display_name_ciphertext   String?
+  status                    String      @default("ACTIVE") // ACTIVE, SUSPENDED
+  oa_friendship_status      String?     // FRIEND, NOT_FRIEND, UNKNOWN
+  oa_friendship_checked_at  DateTime?   @db.Timestamptz
+  created_at                DateTime    @default(now()) @db.Timestamptz
+  updated_at                DateTime    @updatedAt @db.Timestamptz
+
+  access_grants             AccessGrant[]
+  care_relationships        CareRelationship[]    @relation("CaregiverUser")
+  children_created          Child[]               @relation("ChildCreator")
+  consents                  Consent[]
+  contracts_as_guardian     Contract[]            @relation("DesignatedGuardian")
+  contracts_as_caregiver    Contract[]            @relation("CaregiverContracts")
+  source_messages           SourceMessage[]
+  care_events_created       CareEvent[]           @relation("CareEventCreator")
+  care_event_revisions      CareEventRevision[]   @relation("RevisionConfirmedBy")
+  supply_tasks_created      SupplyTask[]          @relation("SupplyTaskCreator")
+  supply_tasks_assigned     SupplyTask[]          @relation("SupplyTaskAssignee")
+  invitations_sent          Invitation[]          @relation("InviterUser")
+  invitations_accepted      Invitation[]          @relation("AcceptedUser")
+  invitations_approved      Invitation[]          @relation("ApprovedUser")
+  audit_logs                AuditLog[]
+  disputes_created          Dispute[]             @relation("DisputeCreator")
+  disputes_resolved         Dispute[]             @relation("DisputeResolver")
+  rate_dates_confirmed      RateCalendarDate[]    @relation("RateDateConfirmedBy")
+  settlements_published     MonthlySettlement[]   @relation("SettlementPublisher")
+  auth_sessions             AuthSession[]
+  daily_log_views           DailyLogView[]
+  guardian_instructions     GuardianInstruction[] @relation("GuardianInstructionCreator")
+
+  @@unique([line_provider_id, line_sub])
+  @@map("users")
+}
+
+model Child {
+  id              String      @id @default(uuid()) @db.Uuid
+  display_alias   String
+  birth_date      DateTime?   @db.Date
+  created_by      String      @db.Uuid
+  created_at      DateTime    @default(now()) @db.Timestamptz
+  archived_at     DateTime?   @db.Timestamptz
+
+  creator         User        @relation("ChildCreator", fields: [created_by], references: [id])
+  access_grants   AccessGrant[]
+  relationships   CareRelationship[]
+  invitations     Invitation[]
+  consents        Consent[]
+  draft_batches   DraftBatch[]
+  care_events     CareEvent[]
+  daily_log_views DailyLogView[]
+  guardian_instructions GuardianInstruction[]
+
+  @@map("children")
+}
+
+model AccessGrant {
+  id              String            @id @default(uuid()) @db.Uuid
+  user_id         String            @db.Uuid
+  child_id        String            @db.Uuid
+  relationship_id String?           @db.Uuid
+  role            String            // GUARDIAN, CAREGIVER, CO_PARENT
+  scopes          String[]          // CARE_READ, CARE_WRITE, HANDOFF_WRITE, CONTRACT_READ, BILLING_READ
+  starts_at       DateTime          @default(now()) @db.Timestamptz
+  ends_at         DateTime?         @db.Timestamptz
+  revoked_at      DateTime?         @db.Timestamptz
+  created_at      DateTime          @default(now()) @db.Timestamptz
+  updated_at      DateTime          @updatedAt @db.Timestamptz
+
+  user            User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  child           Child             @relation(fields: [child_id], references: [id], onDelete: Cascade)
+  relationship    CareRelationship? @relation(fields: [relationship_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, child_id, revoked_at])
+  @@map("access_grants")
+}
+
+model CareRelationship {
+  id                String            @id @default(uuid()) @db.Uuid
+  child_id          String            @db.Uuid
+  caregiver_user_id String            @db.Uuid
+  starts_at         DateTime          @db.Timestamptz
+  ends_at           DateTime?         @db.Timestamptz
+  status            String            @default("ACTIVE") // PENDING, ACTIVE, ENDED
+  created_at        DateTime          @default(now()) @db.Timestamptz
+  updated_at        DateTime          @updatedAt @db.Timestamptz
+
+  child             Child             @relation(fields: [child_id], references: [id], onDelete: Cascade)
+  caregiver         User              @relation("CaregiverUser", fields: [caregiver_user_id], references: [id])
+  access_grants     AccessGrant[]
+  contracts         Contract[]
+  draft_batches     DraftBatch[]
+  care_events       CareEvent[]
+  attendance_sessions AttendanceSession[]
+  supply_tasks      SupplyTask[]
+
+  @@map("care_relationships")
+}
+
+model Invitation {
+  id            String      @id @default(uuid()) @db.Uuid
+  child_id      String      @db.Uuid
+  inviter_id    String      @db.Uuid
+  token_hash    String      @unique
+  target_role   String      // CAREGIVER, CO_PARENT
+  shared_via    String      // SHARE_TARGET_PICKER, COPY_LINK, DIRECT
+  accepted_by   String?     @db.Uuid
+  approved_by   String?     @db.Uuid
+  expires_at    DateTime    @db.Timestamptz
+  consumed_at   DateTime?   @db.Timestamptz
+  status        String      @default("PENDING") // PENDING, ACCEPTED, ACTIVE, EXPIRED, CANCELLED
+  created_at    DateTime    @default(now()) @db.Timestamptz
+  updated_at    DateTime    @updatedAt @db.Timestamptz
+
+  child         Child       @relation(fields: [child_id], references: [id], onDelete: Cascade)
+  inviter       User        @relation("InviterUser", fields: [inviter_id], references: [id])
+  acceptor      User?       @relation("AcceptedUser", fields: [accepted_by], references: [id])
+  approver      User?       @relation("ApprovedUser", fields: [approved_by], references: [id])
+
+  @@map("invitations")
+}
+
+model Consent {
+  id              String    @id @default(uuid()) @db.Uuid
+  user_id         String    @db.Uuid
+  child_id        String?   @db.Uuid
+  purpose         String
+  notice_version  String
+  accepted_at     DateTime  @default(now()) @db.Timestamptz
+  withdrawn_at    DateTime? @db.Timestamptz
+
+  user            User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  child           Child?    @relation(fields: [child_id], references: [id], onDelete: Cascade)
+
+  @@map("consents")
+}
+
+model AuthSession {
+  id          String    @id @default(uuid()) @db.Uuid
+  session_id  String    @unique
+  user_id     String    @db.Uuid
+  line_sub    String
+  provider_id String
+  created_at  DateTime  @default(now()) @db.Timestamptz
+  expires_at  DateTime  @db.Timestamptz
+  revoked_at  DateTime? @db.Timestamptz
+
+  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, revoked_at, expires_at])
+  @@map("auth_sessions")
+}
+
+// -----------------------------------------------------------------------------
+// 2. 接收、工作及草稿 (Ingestion, Jobs & Drafts)
+// -----------------------------------------------------------------------------
+
+model WebhookReceipt {
+  id              String          @id @default(uuid()) @db.Uuid
+  channel_id      String
+  webhook_event_id String
+  event_type      String
+  event_timestamp BigInt
+  received_at     DateTime        @default(now()) @db.Timestamptz
+  status          String          @default("RECEIVED")
+
+  source_messages SourceMessage[]
+
+  @@unique([channel_id, webhook_event_id])
+  @@map("webhook_receipts")
+}
+
+model SourceMessage {
+  id              String          @id @default(uuid()) @db.Uuid
+  receipt_id      String?         @db.Uuid
+  channel_id      String
+  line_message_id String
+  author_user_id  String?         @db.Uuid
+  body_ciphertext String?
+  received_at     DateTime        @default(now()) @db.Timestamptz
+  withdrawn_at    DateTime?       @db.Timestamptz
+  expires_at      DateTime?       @db.Timestamptz
+
+  receipt         WebhookReceipt? @relation(fields: [receipt_id], references: [id], onDelete: SetNull)
+  author          User?           @relation(fields: [author_user_id], references: [id], onDelete: SetNull)
+  draft_batches   DraftBatch[]
+  supply_tasks    SupplyTask[]
+  care_events     CareEvent[]
+
+  @@unique([channel_id, line_message_id])
+  @@map("source_messages")
+}
+
+model Job {
+  id              String      @id @default(uuid()) @db.Uuid
+  kind            String      // EXTRACT, SEND_NOTIFICATION, PURGE_RAW, RECALCULATE
+  dedupe_key      String
+  payload_refs    Json
+  status          String      @default("READY") // READY, RUNNING, SUCCEEDED, RETRY, DEAD
+  attempts        Int         @default(0)
+  next_run_at     DateTime    @default(now()) @db.Timestamptz
+  lease_until     DateTime?   @db.Timestamptz
+  last_error_code String?
+  created_at      DateTime    @default(now()) @db.Timestamptz
+  updated_at      DateTime    @updatedAt @db.Timestamptz
+
+  @@unique([kind, dedupe_key])
+  @@index([status, next_run_at])
+  @@map("jobs")
+}
+
+model DraftBatch {
+  id                    String            @id @default(uuid()) @db.Uuid
+  source_message_id     String?           @db.Uuid
+  child_id              String?           @db.Uuid
+  relationship_id       String?           @db.Uuid
+  created_by            String?           @db.Uuid
+  items                 Json              // [{ item_index, event_type, occurred_at, payload, missing_fields, source_span }]
+  status                String            @default("PENDING_CONFIRMATION") // NEEDS_INPUT, PENDING_CONFIRMATION, CONFIRMED, CANCELLED, EXPIRED, INVALIDATED
+  lock_version          Int               @default(1)
+  expires_at            DateTime          @db.Timestamptz
+  prompt_version        String?
+  schema_version        String?
+  model_id              String?
+  correction_target_id  String?           @db.Uuid
+  created_at            DateTime          @default(now()) @db.Timestamptz
+  updated_at            DateTime          @updatedAt @db.Timestamptz
+
+  source_message        SourceMessage?    @relation(fields: [source_message_id], references: [id], onDelete: SetNull)
+  child                 Child?            @relation(fields: [child_id], references: [id], onDelete: SetNull)
+  relationship          CareRelationship? @relation(fields: [relationship_id], references: [id], onDelete: SetNull)
+  care_events           CareEvent[]
+
+  @@map("draft_batches")
+}
+
+// -----------------------------------------------------------------------------
+// 3. 照護與交班 (Care Events & Handoff)
+// -----------------------------------------------------------------------------
+
+model AttendanceSession {
+  id                  String            @id @default(uuid()) @db.Uuid
+  relationship_id     String            @db.Uuid
+  status              String            @default("OPEN") // OPEN, CLOSED, VOID
+  check_in_event_id   String?           @db.Uuid
+  check_out_event_id  String?           @db.Uuid
+  lock_version        Int               @default(1)
+  created_at          DateTime          @default(now()) @db.Timestamptz
+  updated_at          DateTime          @updatedAt @db.Timestamptz
+
+  relationship        CareRelationship  @relation(fields: [relationship_id], references: [id])
+  care_events         CareEvent[]
+
+  @@map("attendance_sessions")
+}
+
+model CareEvent {
+  id                    String              @id @default(uuid()) @db.Uuid
+  child_id              String              @db.Uuid
+  relationship_id       String              @db.Uuid
+  draft_batch_id        String?             @db.Uuid
+  source_item_index     Int?
+  attendance_session_id String?             @db.Uuid
+  event_type            String              // FEED, SLEEP_START, SLEEP_END, CHECK_IN, CHECK_OUT, PLANNED_PICKUP, MEAL, NIGHT_STAY, TEMPERATURE, DIAPER, BOWEL_MOVEMENT, MEDICATION, ACTIVITY, HYGIENE, GROWTH_MEASUREMENT, NOTE
+  source_type           CareEventSourceType @default(MANUAL)
+  source_message_id     String?             @db.Uuid
+  guardian_instruction_id String?           @db.Uuid
+  current_revision_id   String?             @db.Uuid
+  created_by            String              @db.Uuid
+  created_at            DateTime            @default(now()) @db.Timestamptz
+  updated_at            DateTime            @updatedAt @db.Timestamptz
+
+  child                 Child               @relation(fields: [child_id], references: [id])
+  relationship          CareRelationship    @relation(fields: [relationship_id], references: [id])
+  draft_batch           DraftBatch?         @relation(fields: [draft_batch_id], references: [id], onDelete: SetNull)
+  source_message        SourceMessage?      @relation(fields: [source_message_id], references: [id], onDelete: SetNull)
+  guardian_instruction  GuardianInstruction? @relation(fields: [guardian_instruction_id], references: [id], onDelete: SetNull)
+  attendance_session    AttendanceSession?  @relation(fields: [attendance_session_id], references: [id], onDelete: SetNull)
+  creator               User                @relation("CareEventCreator", fields: [created_by], references: [id])
+  revisions             CareEventRevision[]
+  attachments           CareEventAttachment[]
+
+  @@unique([draft_batch_id, source_item_index])
+  @@index([child_id, relationship_id])
+  @@map("care_events")
+}
+
+model CareEventRevision {
+  id                      String                  @id @default(uuid()) @db.Uuid
+  care_event_id           String                  @db.Uuid
+  revision_no             Int
+  occurred_at             DateTime                @db.Timestamptz
+  payload                 Json
+  action                  String                  // RECORD, CORRECT, VOID
+  supersedes_revision_id  String?                 @db.Uuid
+  confirmed_by            String                  @db.Uuid
+  confirmed_at            DateTime                @default(now()) @db.Timestamptz
+  reason                  String?
+  created_at              DateTime                @default(now()) @db.Timestamptz
+
+  care_event              CareEvent               @relation(fields: [care_event_id], references: [id], onDelete: Cascade)
+  confirmed_user          User                    @relation("RevisionConfirmedBy", fields: [confirmed_by], references: [id])
+  settlement_sources      SettlementLineSource[]
+
+  @@unique([care_event_id, revision_no])
+  @@index([occurred_at, care_event_id])
+  @@map("care_event_revisions")
+}
+
+model SupplyTask {
+  id                  String            @id @default(uuid()) @db.Uuid
+  relationship_id     String            @db.Uuid
+  source_message_id   String?           @db.Uuid
+  created_by          String            @db.Uuid
+  assigned_to         String            @db.Uuid
+  item_name           String
+  quantity            String?
+  due_at              DateTime?         @db.Timestamptz
+  status              String            @default("PENDING") // PENDING, PACKED, RECEIVED, CANCELLED
+  acknowledged_at     DateTime?         @db.Timestamptz
+  packed_at           DateTime?         @db.Timestamptz
+  received_at         DateTime?         @db.Timestamptz
+  lock_version        Int               @default(1)
+  created_at          DateTime          @default(now()) @db.Timestamptz
+  updated_at          DateTime          @updatedAt @db.Timestamptz
+
+  relationship        CareRelationship  @relation(fields: [relationship_id], references: [id])
+  source_message      SourceMessage?    @relation(fields: [source_message_id], references: [id], onDelete: SetNull)
+  creator             User              @relation("SupplyTaskCreator", fields: [created_by], references: [id])
+  assignee            User              @relation("SupplyTaskAssignee", fields: [assigned_to], references: [id])
+
+  @@map("supply_tasks")
+}
+
+// -----------------------------------------------------------------------------
+// 4. 契約與計費政策 (Contracts & Billing Rules)
+// -----------------------------------------------------------------------------
+
+model Contract {
+  id                      String              @id @default(uuid()) @db.Uuid
+  relationship_id         String              @db.Uuid
+  designated_guardian_id  String              @db.Uuid
+  caregiver_user_id       String              @db.Uuid
+  status                  String              @default("ACTIVE") // ACTIVE, TERMINATED
+  created_at              DateTime            @default(now()) @db.Timestamptz
+  updated_at              DateTime            @updatedAt @db.Timestamptz
+
+  relationship            CareRelationship    @relation(fields: [relationship_id], references: [id])
+  designated_guardian     User                @relation("DesignatedGuardian", fields: [designated_guardian_id], references: [id])
+  caregiver               User                @relation("CaregiverContracts", fields: [caregiver_user_id], references: [id])
+  versions                ContractVersion[]
+  monthly_settlements     MonthlySettlement[]
+
+  @@map("contracts")
+}
+
+model ContractVersion {
+  id                  String              @id @default(uuid()) @db.Uuid
+  contract_id         String              @db.Uuid
+  version_no          Int
+  effective_from      DateTime            @db.Timestamptz
+  effective_to        DateTime?           @db.Timestamptz
+  schedule_json       Json
+  terms_json          Json
+  content_hash        String
+  status              String              @default("DRAFT") // DRAFT, PENDING_ACK, AGREED, VOID
+  guardian_ack_hash   String?
+  guardian_ack_at     DateTime?           @db.Timestamptz
+  caregiver_ack_hash  String?
+  caregiver_ack_at    DateTime?           @db.Timestamptz
+  created_at          DateTime            @default(now()) @db.Timestamptz
+  updated_at          DateTime            @updatedAt @db.Timestamptz
+
+  contract            Contract            @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  billing_rule        BillingRule?
+  rate_calendar_dates RateCalendarDate[]
+  settlement_lines    SettlementLine[]
+
+  @@unique([contract_id, version_no])
+  @@map("contract_versions")
+}
+
+model BillingRule {
+  id                    String          @id @default(uuid()) @db.Uuid
+  contract_version_id   String          @unique @db.Uuid
+  billing_mode          String          // FIXED, TEMP
+  base_monthly_amount   Decimal?        @db.Decimal(12, 2)
+  late_unit_minutes     Int?
+  late_unit_rate        Decimal?        @db.Decimal(12, 2)
+  weekday_hourly_rate   Decimal?        @db.Decimal(12, 2)
+  holiday_hourly_rate   Decimal?        @db.Decimal(12, 2)
+  night_rate            Decimal?        @db.Decimal(12, 2)
+  food_mode             String?         // MONTHLY, PER_MEAL
+  food_monthly_amount   Decimal?        @db.Decimal(12, 2)
+  food_per_meal_rate    Decimal?        @db.Decimal(12, 2)
+  rounding_policy       String?         // D01
+  night_policy          String?         // UNRESOLVED, ADDITIVE, REPLACES_OVERLAP
+  partial_month_policy  String?         // BLOCK
+  timezone              String          @default("Asia/Taipei")
+  policy_status         String          @default("ACTIVE")
+  created_at            DateTime        @default(now()) @db.Timestamptz
+  updated_at            DateTime        @updatedAt @db.Timestamptz
+
+  contract_version      ContractVersion @relation(fields: [contract_version_id], references: [id], onDelete: Cascade)
+
+  @@map("billing_rules")
+}
+
+model RateCalendarDate {
+  id                  String          @id @default(uuid()) @db.Uuid
+  contract_version_id String          @db.Uuid
+  local_date          DateTime        @db.Date
+  day_type            String          // WORKDAY, HOLIDAY
+  source_note         String?
+  confirmed_by        String?         @db.Uuid
+  confirmed_at        DateTime?       @db.Timestamptz
+  created_at          DateTime        @default(now()) @db.Timestamptz
+
+  contract_version    ContractVersion @relation(fields: [contract_version_id], references: [id], onDelete: Cascade)
+  confirmed_user      User?           @relation("RateDateConfirmedBy", fields: [confirmed_by], references: [id])
+
+  @@unique([contract_version_id, local_date])
+  @@map("rate_calendar_dates")
+}
+
+// -----------------------------------------------------------------------------
+// 5. 帳單、證據與稽核 (Settlements, Disputes & Audit)
+// -----------------------------------------------------------------------------
+
+model MonthlySettlement {
+  id                    String            @id @default(uuid()) @db.Uuid
+  contract_id           String            @db.Uuid
+  period_start          DateTime          @db.Date
+  revision_no           Int               @default(1)
+  supersedes_id         String?           @db.Uuid
+  status                String            @default("DRAFT") // DRAFT, BLOCKED, PENDING_GUARDIAN, LOCKED, DISPUTED, SUPERSEDED
+  currency              String            @default("TWD")
+  total_amount          Decimal           @db.Decimal(12, 2)
+  delta_from_previous   Decimal?          @db.Decimal(12, 2)
+  engine_version        String            @default("1.0.0")
+  input_hash            String
+  content_hash          String
+  blocking_reasons      Json?
+  published_by          String?           @db.Uuid
+  published_at          DateTime?         @db.Timestamptz
+  guardian_ack_hash     String?
+  guardian_ack_at       DateTime?         @db.Timestamptz
+  locked_at             DateTime?         @db.Timestamptz
+  created_at            DateTime          @default(now()) @db.Timestamptz
+  updated_at            DateTime          @updatedAt @db.Timestamptz
+
+  contract              Contract          @relation(fields: [contract_id], references: [id])
+  publisher             User?             @relation("SettlementPublisher", fields: [published_by], references: [id])
+  settlement_lines      SettlementLine[]
+  disputes              Dispute[]
+
+  @@unique([contract_id, period_start, revision_no])
+  @@map("monthly_settlements")
+}
+
+model SettlementLine {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  settlement_id         String                  @db.Uuid
+  contract_version_id   String                  @db.Uuid
+  item_type             String                  // BASE, OVERTIME, HOURLY, MEAL, NIGHT
+  quantity              Decimal                 @db.Decimal(18, 6)
+  unit                  String                  // MONTH, MINUTE, HOUR, MEAL, NIGHT
+  unit_rate             Decimal                 @db.Decimal(12, 2)
+  amount                Decimal                 @db.Decimal(12, 2)
+  calculation_snapshot  Json
+  line_key              String
+  created_at            DateTime                @default(now()) @db.Timestamptz
+
+  settlement            MonthlySettlement       @relation(fields: [settlement_id], references: [id], onDelete: Cascade)
+  contract_version      ContractVersion         @relation(fields: [contract_version_id], references: [id])
+  sources               SettlementLineSource[]
+
+  @@unique([settlement_id, line_key])
+  @@map("settlement_lines")
+}
+
+model SettlementLineSource {
+  line_id           String            @db.Uuid
+  event_revision_id String            @db.Uuid
+
+  line              SettlementLine    @relation(fields: [line_id], references: [id], onDelete: Cascade)
+  event_revision    CareEventRevision @relation(fields: [event_revision_id], references: [id], onDelete: Cascade)
+
+  @@id([line_id, event_revision_id])
+  @@map("settlement_line_sources")
+}
+
+model Dispute {
+  id              String            @id @default(uuid()) @db.Uuid
+  settlement_id   String            @db.Uuid
+  line_id         String?           @db.Uuid
+  created_by      String            @db.Uuid
+  reason          String
+  status          String            @default("OPEN") // OPEN, RESOLVED
+  resolution      String?
+  resolved_by     String?           @db.Uuid
+  resolved_at     DateTime?         @db.Timestamptz
+  created_at      DateTime          @default(now()) @db.Timestamptz
+  updated_at      DateTime          @updatedAt @db.Timestamptz
+
+  settlement      MonthlySettlement @relation(fields: [settlement_id], references: [id], onDelete: Cascade)
+  creator         User              @relation("DisputeCreator", fields: [created_by], references: [id])
+  resolver        User?             @relation("DisputeResolver", fields: [resolved_by], references: [id])
+
+  @@map("disputes")
+}
+
+model AuditLog {
+  id                String    @id @default(uuid()) @db.Uuid
+  actor_user_id     String?   @db.Uuid
+  action            String
+  resource_type     String
+  resource_id       String    @db.Uuid
+  resource_version  Int?
+  request_id        String?
+  occurred_at       DateTime  @default(now()) @db.Timestamptz
+  metadata_minimal  Json?
+
+  actor             User?     @relation(fields: [actor_user_id], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+model DailyLogView {
+  id          String   @id @default(uuid()) @db.Uuid
+  user_id     String   @db.Uuid
+  child_id    String   @db.Uuid
+  care_date   DateTime @db.Date
+  viewed_at   DateTime @default(now()) @db.Timestamptz
+
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  child       Child    @relation(fields: [child_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, child_id, care_date])
+  @@index([child_id, care_date])
+  @@map("daily_log_views")
+}
+
+model CareEventAttachment {
+  id          String   @id @default(uuid()) @db.Uuid
+  event_id    String   @db.Uuid
+  object_key  String
+  mime_type   String
+  size        Int
+  created_at  DateTime @default(now()) @db.Timestamptz
+
+  care_event  CareEvent @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("care_event_attachments")
+}
+
+enum CareEventSourceType {
+  LINE_AI
+  MANUAL
+  SYSTEM
+}
+
+model GuardianInstruction {
+  id                          String      @id @default(uuid()) @db.Uuid
+  child_id                    String      @db.Uuid
+  created_by_guardian_user_id String      @db.Uuid
+  instruction_type            String      @default("MEDICATION")
+  content                     String
+  created_at                  DateTime    @default(now()) @db.Timestamptz
+  revoked_at                  DateTime?   @db.Timestamptz
+
+  child                       Child       @relation(fields: [child_id], references: [id], onDelete: Cascade)
+  created_by                  User        @relation("GuardianInstructionCreator", fields: [created_by_guardian_user_id], references: [id])
+  care_events                 CareEvent[]
+
+  @@index([child_id, revoked_at])
+  @@map("guardian_instructions")
+}
