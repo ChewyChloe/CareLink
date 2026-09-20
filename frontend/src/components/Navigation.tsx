@@ -1,12 +1,8 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { useAuth } from '../auth/AuthContext';
 
 export function Navigation() {
   const location = useLocation();
   const search = location.search;
-  const { user } = useAuth();
-
-  const isCaregiver = user?.grants?.some(g => g.role === 'CAREGIVER') ?? true; // default true for rich UI
 
   return (
     <>
@@ -86,6 +82,18 @@ export function Navigation() {
               月度報表
             </NavLink>
             <NavLink
+              to={`/contract${search}`}
+              className={({ isActive }) =>
+                `px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                  isActive
+                    ? 'bg-[#a93349] text-[#ffffff] shadow-sm'
+                    : 'text-[#574143] hover:bg-[#eae8e4]'
+                }`
+              }
+            >
+              托育契約
+            </NavLink>
+            <NavLink
               to={`/billing${search}`}
               className={({ isActive }) =>
                 `px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
@@ -112,85 +120,67 @@ export function Navigation() {
       </header>
 
       {/* Mobile Bottom Navigation Bar - Tender Bloom Floating Style */}
-      <nav className="md:hidden fixed bottom-0 w-full z-50 pb-safe bg-[#ffffff]/90 backdrop-blur-xl shadow-[0_-2px_16px_rgba(251,113,133,0.08)] border-t border-[#eae8e4]">
+      <nav className="md:hidden fixed bottom-0 w-full z-50 pb-safe bg-[#ffffff]/95 backdrop-blur-xl shadow-[0_-2px_16px_rgba(251,113,133,0.08)] border-t border-[#eae8e4]">
         <div className="max-w-[760px] mx-auto h-16 px-2 flex items-center justify-around">
           <NavLink
             to={`/children${search}`}
             className={({ isActive }) =>
-              `min-w-[52px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
+              `min-w-[48px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
                 isActive ? 'text-[#a93349] font-bold' : 'text-[#574143] hover:text-[#a93349]'
               }`
             }
           >
-            <span className="material-symbols-outlined text-[22px]">sentiment_satisfied</span>
+            <span className="material-symbols-outlined text-[20px]">sentiment_satisfied</span>
             <span className="text-[10px]">寶寶</span>
           </NavLink>
 
           <NavLink
             to={`/timeline${search}`}
             className={({ isActive }) =>
-              `min-w-[52px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
+              `min-w-[48px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
                 isActive ? 'text-[#a93349] font-bold' : 'text-[#574143] hover:text-[#a93349]'
               }`
             }
           >
-            <span className="material-symbols-outlined text-[22px]">menu_book</span>
+            <span className="material-symbols-outlined text-[20px]">menu_book</span>
             <span className="text-[10px]">日誌</span>
           </NavLink>
 
-          {isCaregiver ? (
-            <NavLink
-              to={`/entry${search}`}
-              className={({ isActive }) =>
-                `min-w-[52px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-all -translate-y-1 ${
-                  isActive ? 'text-[#a93349] font-bold' : 'text-[#a93349] hover:scale-105'
-                }`
-              }
-            >
-              <div className="w-10 h-10 rounded-full bg-[#a93349] text-white flex items-center justify-center shadow-md">
-                <span className="material-symbols-outlined text-[24px]">add</span>
-              </div>
-              <span className="text-[10px] font-semibold mt-0.5">新增</span>
-            </NavLink>
-          ) : null}
-
           <NavLink
-            to={`/calendar${search}`}
+            to={`/contract${search}`}
             className={({ isActive }) =>
-              `min-w-[52px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
+              `min-w-[48px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
                 isActive ? 'text-[#a93349] font-bold' : 'text-[#574143] hover:text-[#a93349]'
               }`
             }
           >
-            <span className="material-symbols-outlined text-[22px]">calendar_month</span>
-            <span className="text-[10px]">日曆</span>
+            <span className="material-symbols-outlined text-[20px]">description</span>
+            <span className="text-[10px]">契約</span>
+          </NavLink>
+
+          <NavLink
+            to={`/billing${search}`}
+            className={({ isActive }) =>
+              `min-w-[48px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
+                isActive ? 'text-[#a93349] font-bold' : 'text-[#574143] hover:text-[#a93349]'
+              }`
+            }
+          >
+            <span className="material-symbols-outlined text-[20px]">payments</span>
+            <span className="text-[10px]">費用</span>
           </NavLink>
 
           <NavLink
             to={`/reports${search}`}
             className={({ isActive }) =>
-              `min-w-[52px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
+              `min-w-[48px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
                 isActive ? 'text-[#a93349] font-bold' : 'text-[#574143] hover:text-[#a93349]'
               }`
             }
           >
-            <span className="material-symbols-outlined text-[22px]">monitoring</span>
+            <span className="material-symbols-outlined text-[20px]">monitoring</span>
             <span className="text-[10px]">報表</span>
           </NavLink>
-
-          {!isCaregiver && (
-            <NavLink
-              to={`/billing${search}`}
-              className={({ isActive }) =>
-                `min-w-[52px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 transition-colors ${
-                  isActive ? 'text-[#a93349] font-bold' : 'text-[#574143] hover:text-[#a93349]'
-                }`
-              }
-            >
-              <span className="material-symbols-outlined text-[22px]">payments</span>
-              <span className="text-[10px]">費用</span>
-            </NavLink>
-          )}
         </div>
       </nav>
     </>

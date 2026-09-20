@@ -91,6 +91,17 @@ describe('Deterministic Billing Engine (Phase B)', () => {
       expect(sixtyMin.chargeableUnits).toBe(2);
       expect(sixtyMin.overtimeAmount).toBe(196);
 
+      // 59 minutes late -> ceil(59/30) = 2 units -> NT$196
+      const fiftyNineMin = calculateOvertimeFee({
+        scheduledEndTime: '18:00',
+        actualCheckoutTime: '18:59',
+        unitMinutes: 30,
+        ratePerUnit: 98,
+      });
+      expect(fiftyNineMin.overtimeMinutes).toBe(59);
+      expect(fiftyNineMin.chargeableUnits).toBe(2);
+      expect(fiftyNineMin.overtimeAmount).toBe(196);
+
       // 61 minutes late -> ceil(61/30) = 3 units -> NT$294
       const sixtyOneMin = calculateOvertimeFee({
         scheduledEndTime: '18:00',
