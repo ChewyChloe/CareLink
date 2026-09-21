@@ -33,19 +33,32 @@ export function ContractPage() {
   const [error, setError] = useState('');
   const [acknowledged, setAcknowledged] = useState(false);
 
+  const targetChildId = childIdParam || user?.grants?.[0]?.childId || '';
+  const isExplicitDemo = searchParams.get('demo') === 'true';
+  const allowDevFallback = Boolean(import.meta.env.DEV && isExplicitDemo);
+
   useEffect(() => {
     setLoading(true);
     setError('');
 
-    const fetchUrl = childIdParam
-      ? `/api/children/${childIdParam}/contract`
+    if (!targetChildId && !allowDevFallback) {
+      setError('未選取受託幼兒，請由寶寶列表選取或重新登入。');
+      setLoading(false);
+      return;
+    }
+
+    const fetchUrl = targetChildId
+      ? `/api/children/${targetChildId}/contract`
       : '/api/contracts/demo-showcase';
 
-    fetch(fetchUrl)
-      .then((res) => {
+    fetch(fetchUrl, { credentials: 'include' })
+      .then(async (res) => {
         if (!res.ok) {
-          // If child endpoint fails or user unauthorized, fallback to demo contract showcase
-          return fetch('/api/contracts/demo-showcase').then((r) => r.json());
+          if (allowDevFallback) {
+            return fetch('/api/contracts/demo-showcase').then((r) => r.json());
+          }
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || `載入契約失敗 (${res.status})`);
         }
         return res.json();
       })
@@ -58,7 +71,7 @@ export function ContractPage() {
       .finally(() => {
         setLoading(false);
       });
-  }, [childIdParam, user]);
+  }, [targetChildId, allowDevFallback, user]);
 
   const formatDateRange = (fromStr: string, toStr: string) => {
     try {
@@ -78,7 +91,7 @@ export function ContractPage() {
           <button
             type="button"
             className="w-9 h-9 rounded-full bg-surface-container-low hover:bg-surface-container-high flex items-center justify-center text-on-surface transition-all active:scale-95 shadow-sm"
-            onClick={() => navigate(childIdParam ? `/timeline?child_id=${childIdParam}` : '/timeline')}
+            onClick={() => navigate(targetChildId ? `/timeline?child_id=${targetChildId}` : '/timeline')}
             title="返回今日紀錄"
           >
             <span className="material-symbols-outlined text-[20px]">arrow_back</span>
