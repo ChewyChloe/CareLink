@@ -199,7 +199,19 @@ export class BillingService {
 
     const childName = grant.child?.display_alias || '寶貝';
 
-    // 2. Query active contract and its applicable agreed version
+    // 2. Compute Month Boundary in Asia/Taipei (UTC+8)
+    const [yearStr, monthStr] = period.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10);
+
+    const monthStartIso = `${yearStr}-${monthStr.padStart(2, '0')}-01T00:00:00+08:00`;
+    // Last day of month
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const monthEndIso = `${yearStr}-${monthStr.padStart(2, '0')}-${String(lastDay).padStart(2, '0')}T23:59:59.999+08:00`;
+    const periodStart = new Date(monthStartIso);
+    const periodEnd = new Date(monthEndIso);
+
+    // 3. Query active contract and all its agreed/active versions
     const contract = await this.prisma.contract.findFirst({
       where: {
         relationship: {
@@ -219,7 +231,6 @@ export class BillingService {
             status: { in: ['AGREED', 'ACTIVE'] },
           },
           orderBy: { version_no: 'desc' },
-          take: 1,
           include: {
             billing_rule: true,
           },
@@ -240,7 +251,27 @@ export class BillingService {
       ];
     }
 
-    const version = contract.versions[0];
+    // Historical Versioning Invariant: Select the version effective during the billing period
+    const applicableVersions = contract.versions.filter((v) => {
+      const effFrom = new Date(v.effective_from);
+      const effTo = v.effective_to ? new Date(v.effective_to) : null;
+      return effFrom <= periodEnd && (!effTo || effTo >= periodStart);
+    });
+
+    if (applicableVersions.length === 0) {
+      return [
+        this.createBlockedSettlement({
+          childId,
+          childName,
+          period,
+          contractId: contract.id,
+          code: 'D02',
+          reason: '缺少該月份適用的有效照護契約版本，暫無法完成計算。',
+        }),
+      ];
+    }
+
+    const version = applicableVersions[0];
     const billingRule = version.billing_rule;
     const schedule = (version.schedule_json as any) || {};
     const scheduledEndTime = schedule.scheduled_end || '18:00';
@@ -262,18 +293,6 @@ export class BillingService {
         }),
       ];
     }
-
-    // 3. Compute Month Boundary in Asia/Taipei (UTC+8)
-    const [yearStr, monthStr] = period.split('-');
-    const year = parseInt(yearStr, 10);
-    const month = parseInt(monthStr, 10);
-
-    const monthStartIso = `${yearStr}-${monthStr.padStart(2, '0')}-01T00:00:00+08:00`;
-    // Last day of month
-    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    const monthEndIso = `${yearStr}-${monthStr.padStart(2, '0')}-${String(lastDay).padStart(2, '0')}T23:59:59.999+08:00`;
-    const periodStart = new Date(monthStartIso);
-    const periodEnd = new Date(monthEndIso);
 
     // 4. Query CareEvents for CHECK_OUT in this child
     const checkoutEvents = await this.prisma.careEvent.findMany({

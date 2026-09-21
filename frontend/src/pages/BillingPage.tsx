@@ -66,19 +66,32 @@ export function BillingPage() {
   const [confirmed, setConfirmed] = useState(false);
   const [showEvidenceModal, setShowEvidenceModal] = useState(false);
 
+  const targetChildId = childIdParam || user?.grants?.[0]?.childId || '';
+  const isExplicitDemo = searchParams.get('demo') === 'true';
+  const allowDevFallback = Boolean(import.meta.env.DEV && isExplicitDemo);
+
   useEffect(() => {
     setLoading(true);
     setError('');
 
-    const fetchUrl = childIdParam
-      ? `/api/children/${childIdParam}/billing/summary?period=${periodParam}`
+    if (!targetChildId && !allowDevFallback) {
+      setError('未選取受託幼兒，請由寶寶列表選取或重新登入。');
+      setLoading(false);
+      return;
+    }
+
+    const fetchUrl = targetChildId
+      ? `/api/children/${targetChildId}/billing/summary?period=${periodParam}`
       : `/api/billing/demo-showcase?period=${periodParam}`;
 
-    fetch(fetchUrl)
-      .then((res) => {
+    fetch(fetchUrl, { credentials: 'include' })
+      .then(async (res) => {
         if (!res.ok) {
-          // Fallback to demo showcase
-          return fetch(`/api/billing/demo-showcase?period=${periodParam}`).then((r) => r.json());
+          if (allowDevFallback) {
+            return fetch(`/api/billing/demo-showcase?period=${periodParam}`).then((r) => r.json());
+          }
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || `載入費用結算失敗 (${res.status})`);
         }
         return res.json();
       })
@@ -95,7 +108,7 @@ export function BillingPage() {
       .finally(() => {
         setLoading(false);
       });
-  }, [periodParam, childIdParam, user]);
+  }, [periodParam, targetChildId, allowDevFallback, user]);
 
   const formatProvenanceSource = (sourceType?: string) => {
     switch (sourceType) {
@@ -142,7 +155,7 @@ export function BillingPage() {
           <button
             type="button"
             className="w-9 h-9 rounded-full bg-surface-container-low hover:bg-surface-container-high flex items-center justify-center text-on-surface transition-all active:scale-95 shadow-sm"
-            onClick={() => navigate(childIdParam ? `/timeline?child_id=${childIdParam}` : '/timeline')}
+            onClick={() => navigate(targetChildId ? `/timeline?child_id=${targetChildId}` : '/timeline')}
             title="返回今日紀錄"
           >
             <span className="material-symbols-outlined text-[20px]">arrow_back</span>
@@ -150,7 +163,7 @@ export function BillingPage() {
           <span className="text-sm font-bold text-stone-800">費用帳務</span>
           <button
             type="button"
-            onClick={() => navigate(childIdParam ? `/contract?child_id=${childIdParam}` : '/contract')}
+            onClick={() => navigate(targetChildId ? `/contract?child_id=${targetChildId}` : '/contract')}
             className="text-xs font-semibold text-[#a93349] hover:underline"
           >
             目前契約 ↗

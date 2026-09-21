@@ -23,6 +23,8 @@ describe('BillingService Integration & Invariants (Section N)', () => {
         version_no: 1,
         status: 'AGREED',
         content_hash: 'hash_cv1',
+        effective_from: new Date('2026-09-01T00:00:00+08:00'),
+        effective_to: new Date('2027-08-31T23:59:59+08:00'),
         schedule_json: { scheduled_start: '09:00', scheduled_end: '18:00' },
         billing_rule: {
           id: 'br-001',
@@ -216,13 +218,9 @@ describe('BillingService Integration & Invariants (Section N)', () => {
     expect(overtimeLines[0].amount).toBe(196); // 18:31 -> 2 units * 98 = 196
   });
 
-  it('Case 13: new ContractVersion does not alter old billing evidence snapshot', async () => {
-    // Simulate settlement computed under version 1 (rate NT$98)
-    const demoSettlementV1 = service.getDemoShowcase('2026-09');
-    const oldSnapshot = { ...demoSettlementV1.lines.find((l) => l.item_type === 'OVERTIME')! };
-
-    // Now imagine contract version is updated to v2 with late_unit_rate = 150
-    const v2Contract = {
+  it('Case 13: new ContractVersion v2 (rate 120) does not alter old billing evidence for v1 period (rate 98 -> NT$196)', async () => {
+    // Both v1 (Sep 2026, 98 TWD) and v2 (Oct 2026, 120 TWD) exist in contract
+    const contractWithV1AndV2 = {
       ...mockActiveContract,
       versions: [
         {
@@ -230,21 +228,60 @@ describe('BillingService Integration & Invariants (Section N)', () => {
           version_no: 2,
           status: 'AGREED',
           content_hash: 'hash_cv2',
+          effective_from: new Date('2026-10-01T00:00:00+08:00'),
+          effective_to: new Date('2027-08-31T23:59:59+08:00'),
           schedule_json: { scheduled_start: '09:00', scheduled_end: '18:00' },
           billing_rule: {
             id: 'br-002',
             late_unit_minutes: 30,
-            late_unit_rate: 150,
+            late_unit_rate: 120, // increased rate
+            base_monthly_amount: 18000,
+          },
+        },
+        {
+          id: 'cv-version-1',
+          version_no: 1,
+          status: 'AGREED',
+          content_hash: 'hash_cv1',
+          effective_from: new Date('2026-09-01T00:00:00+08:00'),
+          effective_to: new Date('2026-09-30T23:59:59+08:00'),
+          schedule_json: { scheduled_start: '09:00', scheduled_end: '18:00' },
+          billing_rule: {
+            id: 'br-001',
+            late_unit_minutes: 30,
+            late_unit_rate: 98,
             base_monthly_amount: 18000,
           },
         },
       ],
     };
 
-    // Prior settlement line explicitly preserves contract_version_id and rate
-    expect(oldSnapshot.calculation_snapshot.rate_per_unit).toBe(98);
-    expect(oldSnapshot.amount).toBe(196);
-    expect(demoSettlementV1.contract_version_id).toBe('cv000000-0000-0000-0000-000000000001');
+    prismaMock.contract.findFirst.mockResolvedValueOnce(contractWithV1AndV2);
+    prismaMock.careEvent.findMany.mockResolvedValueOnce([
+      {
+        id: 'ev-v1-hist',
+        child_id: childId,
+        event_type: 'CHECK_OUT',
+        current_revision_id: 'rev-v1-hist',
+        source_type: 'LINE_AI',
+        revisions: [
+          {
+            id: 'rev-v1-hist',
+            action: 'RECORD',
+            occurred_at: new Date('2026-09-17T18:31:00+08:00'),
+            payload: {},
+          },
+        ],
+      },
+    ]);
+
+    // Requesting September 2026 MUST resolve to v1 (98 TWD -> NT$ 196), not retroactively altered by v2 (120 TWD)
+    const sepResult = await service.getSettlementsForChild(childId, userId, '2026-09');
+    expect(sepResult[0].contract_version_id).toBe('cv-version-1');
+    expect(sepResult[0].overtime_amount).toBe(196); // 2 units * 98 = 196
+    const overtimeLine = sepResult[0].lines.find((l) => l.item_type === 'OVERTIME');
+    expect(overtimeLine?.unit_rate).toBe(98);
+    expect(overtimeLine?.amount).toBe(196);
   });
 
   it('Case 14: Asia/Taipei date/month boundary handling', async () => {
