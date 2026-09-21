@@ -9,7 +9,7 @@ export interface PromptMetadata {
   description: string;
 }
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 export const CARE_EVENT_EXTRACTION_PROMPT_METADATA: PromptMetadata = {
   promptId: 'care_event_extraction:v1',
