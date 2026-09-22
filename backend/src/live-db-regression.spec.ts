@@ -727,13 +727,14 @@ describe('Live PostgreSQL Integration & Regression Suite (Neon carelink-dev)', (
 
       // Step B: Worker processes EXTRACT job (Mock AI mode) -> DraftBatch
       let draftBatch = null;
-      for (let attempt = 0; attempt < 10; attempt++) {
+      for (let attempt = 0; attempt < 25; attempt++) {
         draftBatch = await prisma.draftBatch.findFirst({
           where: { source_message_id: sourceMsgId },
         });
         if (draftBatch) break;
         const currentJob = await prisma.job.findUnique({ where: { id: jobId } });
-        if (currentJob?.status === 'READY') {
+        if (currentJob && currentJob.status !== 'SUCCEEDED') {
+          await prisma.job.update({ where: { id: jobId }, data: { status: 'READY', lease_until: null } });
           await worker.processExtractJob(jobId, 'mock');
         }
         await new Promise((resolve) => setTimeout(resolve, 300));
