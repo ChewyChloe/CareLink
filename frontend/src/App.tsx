@@ -38,7 +38,9 @@ export const AppRoutes: React.FC = () => {
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/billing" element={<BillingPage />} />
           <Route path="/contract" element={<ContractPage />} />
+          <Route path="/contracts" element={<ContractPage />} />
           <Route path="/handoff" element={<HandoffPage />} />
+          <Route path="/settings" element={<ChildrenPage />} />
           <Route path="/dev" element={<DevPage />} />
           <Route path="*" element={<Navigate to="/children" replace />} />
         </Routes>
