@@ -62,14 +62,14 @@ describe('Flex Message Schema Structural Validation (flex-message.schema.spec)',
     expect(primaryBtn.style).toBe('primary');
     expect(primaryBtn.action).toBeDefined();
     expect(primaryBtn.action.type).toBe('postback');
-    expect(primaryBtn.action.label).toBe('確認 2 筆');
+    expect(primaryBtn.action.label).toBe('確認 2 筆記錄');
 
     const secondaryRow = bubble.footer.contents[1];
     expect(secondaryRow.type).toBe('box');
     expect(secondaryRow.layout).toBe('horizontal');
     expect(secondaryRow.contents).toHaveLength(2);
     expect(secondaryRow.contents[0].type).toBe('button');
-    expect(secondaryRow.contents[0].action.label).toBe('查看／修改');
+    expect(secondaryRow.contents[0].action.label).toBe('查看 / 修改');
     expect(secondaryRow.contents[1].type).toBe('button');
     expect(secondaryRow.contents[1].action.label).toBe('捨棄');
 
@@ -80,10 +80,11 @@ describe('Flex Message Schema Structural Validation (flex-message.schema.spec)',
     expect(serialized).not.toContain('Invalid Date');
     expect(serialized).toContain('湯圓的今日照護');
     expect(serialized).toContain('11:40');
-    expect(serialized).toContain('150 ml · 配方奶');
+    expect(serialized).toContain('150 ml');
+    expect(serialized).toContain('配方奶');
     expect(serialized).toContain('13:10');
     expect(serialized).toContain('開始午睡');
-    expect(serialized).toContain('AI 已整理好，請確認內容。');
+    expect(serialized).toContain('CareLink AI 已整理好，請家長確認內容。');
   });
 
   it('should generate a valid Success Flex Bubble conforming to LINE Flex specification', () => {
