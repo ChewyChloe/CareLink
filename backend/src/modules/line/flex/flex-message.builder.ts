@@ -459,4 +459,142 @@ export class FlexMessageBuilder {
       },
     };
   }
+
+  /**
+   * Generates a LINE Flex Message bubble container for a supply reminder push to Guardian.
+   * Uses Tender Bloom palette consistent with existing CareLink Flex messages.
+   */
+  public static buildSupplyReminderFlex(params: {
+    childAlias: string;
+    itemName: string;
+    note: string;
+    supplyTaskId: string;
+    commerceUrl: string | null;
+  }): Record<string, any> {
+    const { childAlias, itemName, note, supplyTaskId, commerceUrl } = params;
+
+    const bodyContents: any[] = [
+      // Brand header
+      {
+        type: 'box',
+        layout: 'horizontal',
+        contents: [
+          {
+            type: 'text',
+            text: 'CareLink',
+            weight: 'bold',
+            size: 'xs',
+            color: '#56665B',
+            flex: 4,
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#FFF3E0',
+            cornerRadius: 'md',
+            paddingStart: 'sm',
+            paddingEnd: 'sm',
+            paddingTop: 'xs',
+            paddingBottom: 'xs',
+            contents: [
+              {
+                type: 'text',
+                text: '用品提醒',
+                size: 'xxs',
+                color: '#855316',
+                align: 'center',
+                weight: 'bold',
+              },
+            ],
+          },
+        ],
+      },
+      // Main title
+      {
+        type: 'text',
+        text: `${childAlias}需要補充${itemName}`,
+        weight: 'bold',
+        size: 'md',
+        color: '#293C32',
+        margin: 'lg',
+        wrap: true,
+      },
+      // Note
+      {
+        type: 'text',
+        text: note,
+        size: 'sm',
+        color: '#56665B',
+        margin: 'sm',
+        wrap: true,
+      },
+      // Divider
+      {
+        type: 'separator',
+        margin: 'lg',
+        color: '#DFE4D8',
+      },
+      // Helper text
+      {
+        type: 'text',
+        text: '老師提醒您準備以上用品',
+        size: 'xxs',
+        color: '#6D776C',
+        align: 'center',
+        margin: 'sm',
+      },
+    ];
+
+    // Footer actions
+    const footerContents: any[] = [
+      // Primary: 已經準備好了
+      {
+        type: 'button',
+        style: 'primary',
+        color: '#466B53',
+        height: 'sm',
+        action: {
+          type: 'postback',
+          label: '已經準備好了',
+          data: `action=supply_packed&id=${supplyTaskId}`,
+          displayText: '已經準備好了',
+        },
+      },
+    ];
+
+    // Secondary: commerce link (only if URL is configured)
+    if (commerceUrl) {
+      footerContents.push({
+        type: 'button',
+        style: 'link',
+        color: '#56665B',
+        height: 'sm',
+        action: {
+          type: 'uri',
+          label: `前往購買${itemName}`,
+          uri: commerceUrl,
+        },
+      });
+    }
+
+    return {
+      type: 'bubble',
+      size: 'kilo',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: 'lg',
+        backgroundColor: '#FFFFFF',
+        contents: bodyContents,
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'md',
+        backgroundColor: '#FFFFFF',
+        contents: footerContents,
+      },
+    };
+  }
 }

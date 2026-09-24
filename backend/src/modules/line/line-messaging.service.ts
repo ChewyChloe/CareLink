@@ -67,6 +67,7 @@ export class LineMessagingService {
     toUserId: string,
     altText: string,
     flexContainer: Record<string, any>,
+    retryKey?: string,
   ): Promise<boolean> {
     const token = this.getAccessToken();
     if (!token) {
@@ -75,12 +76,17 @@ export class LineMessagingService {
     }
 
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      };
+      if (retryKey) {
+        headers['X-Line-Retry-Key'] = retryKey;
+      }
+
       const res = await fetch(this.pushEndpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers,
         body: JSON.stringify({
           to: toUserId,
           messages: [
