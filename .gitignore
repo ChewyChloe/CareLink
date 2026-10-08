@@ -42,6 +42,14 @@ pgdata/
 .env.local
 
 .cache/
+scratch/
+
+# Internal specifications
+01_PRD_v1.md
+02_User_Journey.md
+03_ERD.md
+04_System_Architecture.md
+05_MVP_Backlog.md
 
 # Internal specifications
 01_PRD_v1.md

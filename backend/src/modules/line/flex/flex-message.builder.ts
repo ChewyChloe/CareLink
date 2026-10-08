@@ -151,8 +151,89 @@ export class FlexMessageBuilder {
   }
 
   /**
+   * Helper to determine day period (上午 / 午後 / 晚上) from raw time.
+   */
+  public static getDayPeriod(rawTime: string): string {
+    const formatted = this.formatTime(rawTime);
+    if (!formatted || !formatted.includes(':')) return '';
+    const hour = parseInt(formatted.split(':')[0], 10);
+    if (isNaN(hour)) return '';
+    if (hour < 12) return '上午';
+    if (hour < 18) return '午後';
+    return '晚上';
+  }
+
+  /**
+   * Helper to extract subtype badge tag and detail summary text from a draft item.
+   */
+  public static getItemDisplayDetails(item: FlexDraftItem): {
+    tag?: string;
+    summary: string;
+  } {
+    const p = item.payload || {};
+    let tag: string | undefined;
+    const parts: string[] = [];
+
+    if (item.event_type === 'FEED') {
+      if (p.feed_type) {
+        const ftMap: Record<string, string> = {
+          FORMULA: '配方奶',
+          BREAST_MILK: '母乳',
+          COW_MILK: '鮮奶',
+        };
+        tag = ftMap[p.feed_type] || p.feed_type;
+      }
+      const amount = p.amount !== undefined ? p.amount : p.amount_ml;
+      const unit = p.amount_unit || (amount !== undefined ? 'ml' : '');
+      if (amount !== undefined) {
+        parts.push(`${amount} ${unit}`.trim());
+      }
+      if (p.appetite) {
+        parts.push(`食慾${p.appetite}`);
+      } else if (p.notes) {
+        parts.push(p.notes);
+      } else if (item.source_span && item.source_span.includes('食慾正常')) {
+        parts.push('食慾正常');
+      }
+    } else if (item.event_type === 'SLEEP_START') {
+      if (p.location) {
+        const locMap: Record<string, string> = { CRIB: '嬰兒床', BED: '大床', MAT: '地墊' };
+        tag = locMap[p.location] || p.location;
+      } else if (p.sleep_type) {
+        const stMap: Record<string, string> = { NAP: '嬰兒床', NIGHT: '夜間' };
+        tag = stMap[p.sleep_type] || p.sleep_type;
+      }
+      if (p.notes) {
+        parts.push(p.notes);
+      } else {
+        parts.push('已入睡 · 狀態穩定');
+      }
+    } else if (item.event_type === 'SLEEP_END') {
+      tag = '清醒';
+      if (p.notes) parts.push(p.notes);
+      else parts.push('精神良好');
+    } else if (item.event_type === 'MEAL') {
+      if (p.meal_type) tag = p.meal_type;
+      if (p.solid_food_name) parts.push(p.solid_food_name);
+      if (p.portions) parts.push(`${p.portions} 份`);
+      if (p.notes) parts.push(p.notes);
+    } else {
+      if (p.notes) parts.push(p.notes);
+    }
+
+    if (parts.length === 0 && !tag) {
+      return { summary: this.formatItemSummary(item) };
+    }
+
+    return {
+      tag,
+      summary: parts.join(' · '),
+    };
+  }
+
+  /**
    * Generates a LINE Flex Message bubble container for a DraftBatch.
-   * Redesigned with warm off-white, sage green accents, and clear information hierarchy.
+   * Redesigned with warm tactile aesthetic, brand green (#3B4B3D), record cards, and editorial hierarchy.
    */
   public static buildDraftConfirmationFlex(
     draft: FlexDraftBatchData,
@@ -165,64 +246,80 @@ export class FlexMessageBuilder {
     );
 
     const statusBadge = hasMissingFields
-      ? { text: '需補填', color: '#A04437', bg: '#FFEBEE' }
-      : { text: '待確認', color: '#466B53', bg: '#E8EFE2' };
+      ? { text: '需補填', color: '#A04437', bg: '#FFEBEE', border: '#FFCDD2' }
+      : { text: '待確認', color: '#4A463F', bg: '#EFECE4', border: '#E2DDD3' };
 
-    // Event rows with clean divider and whitespace (no heavy gray boxes)
-    const eventRowContents: any[] = [];
+    // Record card items
+    const recordCards: any[] = [];
 
-    draft.items.forEach((item, idx) => {
-      if (idx > 0) {
-        eventRowContents.push({
-          type: 'separator',
-          margin: 'md',
-          color: '#DFE4D8',
-        });
-      }
-
+    draft.items.forEach((item) => {
       const display = this.getEventTypeDisplay(item.event_type);
       const time = this.formatTime(item.occurred_at);
-      const summary = this.formatItemSummary(item);
+      const period = this.getDayPeriod(item.occurred_at);
+      const details = this.getItemDisplayDetails(item);
       const itemMissing = item.missing_fields && item.missing_fields.length > 0;
 
-      const itemBoxContents: any[] = [
+      // Event title row with optional tag pill
+      const titleRowContents: any[] = [
         {
-          type: 'box',
-          layout: 'horizontal',
-          contents: [
-            {
-              type: 'text',
-              text: display.label,
-              weight: 'bold',
-              size: 'sm',
-              color: '#293C32',
-              flex: 4,
-            },
-            {
-              type: 'text',
-              text: time,
-              size: 'xs',
-              color: '#6D776C',
-              align: 'end',
-              flex: 2,
-            },
-          ],
+          type: 'text',
+          text: display.label,
+          weight: 'bold',
+          size: 'sm',
+          color: '#1C1A17',
+          flex: 0,
         },
       ];
 
-      if (summary) {
-        itemBoxContents.push({
+      if (details.tag) {
+        titleRowContents.push({
+          type: 'box',
+          layout: 'vertical',
+          backgroundColor: '#F2EFE8',
+          borderColor: '#E5E0D5',
+          borderWidth: 'light',
+          cornerRadius: 'sm',
+          paddingStart: 'xs',
+          paddingEnd: 'xs',
+          paddingTop: 'none',
+          paddingBottom: 'none',
+          justifyContent: 'center',
+          flex: 0,
+          contents: [
+            {
+              type: 'text',
+              text: details.tag,
+              size: 'xxs',
+              color: '#5C564D',
+              weight: 'bold',
+            },
+          ],
+        });
+      }
+
+      const middleContents: any[] = [
+        {
+          type: 'box',
+          layout: 'horizontal',
+          spacing: 'xs',
+          alignItems: 'center',
+          contents: titleRowContents,
+        },
+      ];
+
+      if (details.summary) {
+        middleContents.push({
           type: 'text',
-          text: summary,
+          text: details.summary,
           size: 'xs',
-          color: '#56665B',
+          color: '#78736A',
           margin: 'xs',
           wrap: true,
         });
       }
 
       if (itemMissing) {
-        itemBoxContents.push({
+        middleContents.push({
           type: 'text',
           text: `⚠️ 缺少必填: ${item.missing_fields!.join(', ')}`,
           size: 'xxs',
@@ -232,45 +329,142 @@ export class FlexMessageBuilder {
         });
       }
 
-      eventRowContents.push({
+      const timeContents: any[] = [
+        {
+          type: 'text',
+          text: time,
+          weight: 'bold',
+          size: 'xs',
+          color: '#1C1A17',
+          align: 'end',
+        },
+      ];
+
+      if (period) {
+        timeContents.push({
+          type: 'text',
+          text: period,
+          size: 'xxs',
+          color: '#8C867C',
+          align: 'end',
+        });
+      }
+
+      recordCards.push({
         type: 'box',
-        layout: 'vertical',
-        margin: idx === 0 ? 'none' : 'md',
-        contents: itemBoxContents,
+        layout: 'horizontal',
+        backgroundColor: '#FFFFFF',
+        borderColor: '#EBE7DF',
+        borderWidth: 'light',
+        cornerRadius: 'md',
+        paddingAll: 'md',
+        spacing: 'md',
+        alignItems: 'center',
+        contents: [
+          // Icon box
+          {
+            type: 'box',
+            layout: 'vertical',
+            width: '34px',
+            height: '34px',
+            backgroundColor: '#F5F2EB',
+            borderColor: '#E6E2D8',
+            borderWidth: 'light',
+            cornerRadius: 'md',
+            justifyContent: 'center',
+            alignItems: 'center',
+            flex: 0,
+            contents: [
+              {
+                type: 'text',
+                text: display.icon,
+                size: 'sm',
+                align: 'center',
+              },
+            ],
+          },
+          // Middle content
+          {
+            type: 'box',
+            layout: 'vertical',
+            flex: 5,
+            contents: middleContents,
+          },
+          // Right time
+          {
+            type: 'box',
+            layout: 'vertical',
+            alignItems: 'flex-end',
+            justifyContent: 'center',
+            flex: 2,
+            contents: timeContents,
+          },
+        ],
       });
     });
 
     const liffUrl = `https://liff.line.me/${miniAppChannelId}/drafts/${draft.id}`;
 
+    // Status Note (AI Callout banner)
+    const calloutBanner = {
+      type: 'box',
+      layout: 'horizontal',
+      backgroundColor: '#F2EFE8',
+      borderColor: '#E6E2D8',
+      borderWidth: 'light',
+      cornerRadius: 'md',
+      paddingAll: 'sm',
+      spacing: 'xs',
+      alignItems: 'center',
+      contents: [
+        {
+          type: 'text',
+          text: '✓',
+          size: 'xs',
+          color: '#3B4B3D',
+          weight: 'bold',
+          flex: 0,
+        },
+        {
+          type: 'text',
+          text: 'CareLink AI 已整理好，請家長確認內容。',
+          size: 'xxs',
+          color: '#4A463F',
+          wrap: true,
+          flex: 1,
+        },
+      ],
+    };
+
     // Footer actions
     const footerContents: any[] = [];
 
-    // Primary CTA: 確認 N 筆 (or 確認 N 筆紀錄)
+    // Primary CTA: 確認 N 筆記錄
     if (!hasMissingFields) {
       footerContents.push({
         type: 'button',
         style: 'primary',
-        color: '#466B53',
+        color: '#3B4B3D',
         height: 'sm',
         action: {
           type: 'postback',
-          label: `確認 ${draft.items.length} 筆`,
+          label: `確認 ${draft.items.length} 筆記錄`,
           data: `action=confirm_draft&draft_id=${draft.id}&expected_version=${draft.lock_version}`,
           displayText: '已確認照護紀錄',
         },
       });
     }
 
-    // Secondary actions row: 查看／修改 + 捨棄
+    // Secondary actions row: 查看 / 修改 + 捨棄
     const secondaryButtons: any[] = [
       {
         type: 'button',
         style: hasMissingFields ? 'primary' : 'link',
-        color: hasMissingFields ? '#466B53' : '#56665B',
+        color: hasMissingFields ? '#3B4B3D' : '#4A463F',
         height: 'sm',
         action: {
           type: 'uri',
-          label: hasMissingFields ? '在 MINI App 補填必填欄位' : '查看／修改',
+          label: hasMissingFields ? '在 MINI App 補填必填欄位' : '查看 / 修改',
           uri: liffUrl,
         },
       },
@@ -280,7 +474,7 @@ export class FlexMessageBuilder {
       secondaryButtons.push({
         type: 'button',
         style: 'link',
-        color: '#8C968B',
+        color: '#DC2626',
         height: 'sm',
         action: {
           type: 'postback',
@@ -295,9 +489,123 @@ export class FlexMessageBuilder {
       type: 'box',
       layout: 'horizontal',
       spacing: 'sm',
-      margin: 'xs',
       contents: secondaryButtons,
     });
+
+    const headerBox = {
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: '#FFFFFF',
+      paddingAll: 'lg',
+      paddingBottom: 'md',
+      contents: [
+        // Row 1: Brand dot + CARELINK, Status pill
+        {
+          type: 'box',
+          layout: 'horizontal',
+          alignItems: 'center',
+          contents: [
+            {
+              type: 'box',
+              layout: 'horizontal',
+              spacing: 'xs',
+              alignItems: 'center',
+              flex: 4,
+              contents: [
+                {
+                  type: 'text',
+                  text: '● CARELINK',
+                  weight: 'bold',
+                  size: 'xxs',
+                  color: '#3B4B3D',
+                },
+              ],
+            },
+            {
+              type: 'box',
+              layout: 'vertical',
+              backgroundColor: statusBadge.bg,
+              borderColor: statusBadge.border,
+              borderWidth: 'light',
+              cornerRadius: 'sm',
+              paddingStart: 'md',
+              paddingEnd: 'md',
+              paddingTop: 'xs',
+              paddingBottom: 'xs',
+              contents: [
+                {
+                  type: 'text',
+                  text: statusBadge.text,
+                  size: 'xxs',
+                  color: statusBadge.color,
+                  align: 'center',
+                  weight: 'bold',
+                },
+              ],
+            },
+          ],
+        },
+        // Row 2: Title & subtitle, Tag
+        {
+          type: 'box',
+          layout: 'horizontal',
+          margin: 'sm',
+          alignItems: 'center',
+          contents: [
+            {
+              type: 'box',
+              layout: 'vertical',
+              flex: 5,
+              contents: [
+                {
+                  type: 'text',
+                  text: `${childName}的今日照護`,
+                  weight: 'bold',
+                  size: 'md',
+                  color: '#1C1A17',
+                },
+                {
+                  type: 'text',
+                  text: `${dateStr} · ${draft.items.length} 筆待確認`,
+                  size: 'xs',
+                  color: '#78736A',
+                  margin: 'xs',
+                },
+              ],
+            },
+            {
+              type: 'box',
+              layout: 'vertical',
+              flex: 2,
+              alignItems: 'flex-end',
+              contents: [
+                {
+                  type: 'box',
+                  layout: 'vertical',
+                  backgroundColor: '#F2EFE8',
+                  borderColor: '#E6E2D8',
+                  borderWidth: 'light',
+                  cornerRadius: 'xxl',
+                  paddingStart: 'md',
+                  paddingEnd: 'md',
+                  paddingTop: 'xs',
+                  paddingBottom: 'xs',
+                  contents: [
+                    {
+                      type: 'text',
+                      text: '幼兒作息',
+                      size: 'xxs',
+                      color: '#78736A',
+                      align: 'center',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
 
     return {
       type: 'bubble',
@@ -305,81 +613,23 @@ export class FlexMessageBuilder {
       body: {
         type: 'box',
         layout: 'vertical',
-        paddingAll: 'lg',
-        backgroundColor: '#FFFFFF',
+        paddingAll: 'none',
+        backgroundColor: '#FBF9F5',
         contents: [
-          // Brand + Status pill header
+          headerBox,
+          {
+            type: 'separator',
+            color: '#E6E2D8',
+          },
           {
             type: 'box',
-            layout: 'horizontal',
+            layout: 'vertical',
+            paddingAll: 'md',
+            spacing: 'sm',
             contents: [
-              {
-                type: 'text',
-                text: 'CareLink',
-                weight: 'bold',
-                size: 'xs',
-                color: '#56665B',
-                flex: 4,
-              },
-              {
-                type: 'box',
-                layout: 'vertical',
-                backgroundColor: statusBadge.bg,
-                cornerRadius: 'md',
-                paddingStart: 'sm',
-                paddingEnd: 'sm',
-                paddingTop: 'xs',
-                paddingBottom: 'xs',
-                contents: [
-                  {
-                    type: 'text',
-                    text: statusBadge.text,
-                    size: 'xxs',
-                    color: statusBadge.color,
-                    align: 'center',
-                    weight: 'bold',
-                  },
-                ],
-              },
+              ...recordCards,
+              calloutBanner,
             ],
-          },
-          // Main title + subtitle
-          {
-            type: 'text',
-            text: `${childName}的今日照護`,
-            weight: 'bold',
-            size: 'lg',
-            color: '#293C32',
-            margin: 'md',
-          },
-          {
-            type: 'text',
-            text: `${dateStr} · ${draft.items.length} 筆待確認`,
-            size: 'xs',
-            color: '#6D776C',
-            margin: 'xs',
-          },
-          // Divider
-          {
-            type: 'separator',
-            margin: 'md',
-            color: '#DFE4D8',
-          },
-          // Event rows
-          ...eventRowContents,
-          // Bottom microcopy helper
-          {
-            type: 'separator',
-            margin: 'lg',
-            color: '#DFE4D8',
-          },
-          {
-            type: 'text',
-            text: 'AI 已整理好，請確認內容。',
-            size: 'xxs',
-            color: '#6D776C',
-            align: 'center',
-            margin: 'sm',
           },
         ],
       },
@@ -388,8 +638,18 @@ export class FlexMessageBuilder {
         layout: 'vertical',
         spacing: 'xs',
         paddingAll: 'md',
-        backgroundColor: '#FFFFFF',
+        backgroundColor: '#FBF9F5',
         contents: footerContents,
+      },
+      styles: {
+        body: {
+          backgroundColor: '#FBF9F5',
+        },
+        footer: {
+          backgroundColor: '#FBF9F5',
+          separator: true,
+          separatorColor: '#EBE7DF',
+        },
       },
     };
   }
@@ -456,6 +716,144 @@ export class FlexMessageBuilder {
             },
           },
         ],
+      },
+    };
+  }
+
+  /**
+   * Generates a LINE Flex Message bubble container for a supply reminder push to Guardian.
+   * Uses Tender Bloom palette consistent with existing CareLink Flex messages.
+   */
+  public static buildSupplyReminderFlex(params: {
+    childAlias: string;
+    itemName: string;
+    note: string;
+    supplyTaskId: string;
+    commerceUrl: string | null;
+  }): Record<string, any> {
+    const { childAlias, itemName, note, supplyTaskId, commerceUrl } = params;
+
+    const bodyContents: any[] = [
+      // Brand header
+      {
+        type: 'box',
+        layout: 'horizontal',
+        contents: [
+          {
+            type: 'text',
+            text: 'CareLink',
+            weight: 'bold',
+            size: 'xs',
+            color: '#56665B',
+            flex: 4,
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#FFF3E0',
+            cornerRadius: 'md',
+            paddingStart: 'sm',
+            paddingEnd: 'sm',
+            paddingTop: 'xs',
+            paddingBottom: 'xs',
+            contents: [
+              {
+                type: 'text',
+                text: '用品提醒',
+                size: 'xxs',
+                color: '#855316',
+                align: 'center',
+                weight: 'bold',
+              },
+            ],
+          },
+        ],
+      },
+      // Main title
+      {
+        type: 'text',
+        text: `${childAlias}需要補充${itemName}`,
+        weight: 'bold',
+        size: 'md',
+        color: '#293C32',
+        margin: 'lg',
+        wrap: true,
+      },
+      // Note
+      {
+        type: 'text',
+        text: note,
+        size: 'sm',
+        color: '#56665B',
+        margin: 'sm',
+        wrap: true,
+      },
+      // Divider
+      {
+        type: 'separator',
+        margin: 'lg',
+        color: '#DFE4D8',
+      },
+      // Helper text
+      {
+        type: 'text',
+        text: '老師提醒您準備以上用品',
+        size: 'xxs',
+        color: '#6D776C',
+        align: 'center',
+        margin: 'sm',
+      },
+    ];
+
+    // Footer actions
+    const footerContents: any[] = [
+      // Primary: 已經準備好了
+      {
+        type: 'button',
+        style: 'primary',
+        color: '#466B53',
+        height: 'sm',
+        action: {
+          type: 'postback',
+          label: '已經準備好了',
+          data: `action=supply_packed&id=${supplyTaskId}`,
+          displayText: '已經準備好了',
+        },
+      },
+    ];
+
+    // Secondary: commerce link (only if URL is configured)
+    if (commerceUrl) {
+      footerContents.push({
+        type: 'button',
+        style: 'link',
+        color: '#56665B',
+        height: 'sm',
+        action: {
+          type: 'uri',
+          label: `前往購買${itemName}`,
+          uri: commerceUrl,
+        },
+      });
+    }
+
+    return {
+      type: 'bubble',
+      size: 'kilo',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: 'lg',
+        backgroundColor: '#FFFFFF',
+        contents: bodyContents,
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        paddingAll: 'md',
+        backgroundColor: '#FFFFFF',
+        contents: footerContents,
       },
     };
   }

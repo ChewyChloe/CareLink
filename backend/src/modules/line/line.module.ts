@@ -7,9 +7,10 @@ import { MessageEncryptionService } from './crypto/message-encryption.service';
 import { LineMessagingService } from './line-messaging.service';
 import { CareModule } from '../care/care.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { HandoffModule } from '../handoff/handoff.module';
 
 @Module({
-  imports: [CareModule, forwardRef(() => JobsModule)],
+  imports: [CareModule, forwardRef(() => JobsModule), forwardRef(() => HandoffModule)],
   controllers: [LineWebhookController],
   providers: [
     LineWebhookService,

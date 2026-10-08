@@ -7,6 +7,7 @@ import { DraftService } from '../care/draft.service';
 import { LineMessagingService } from './line-messaging.service';
 import { ExtractionWorker } from '../jobs/extraction.worker';
 import { FlexMessageBuilder } from './flex/flex-message.builder';
+import { SupplyReminderService } from '../handoff/supply-reminder.service';
 
 export interface WebhookProcessResult {
   eventId: string;
@@ -24,7 +25,8 @@ export interface WebhookProcessResult {
     | 'postback_failed'
     | 'unsupported_event'
     | 'missing_source_user'
-    | 'user_not_registered';
+    | 'user_not_registered'
+    | 'quick_record_prompt_sent';
   receiptId?: string;
   sourceMessageId?: string;
   jobId?: string;
@@ -43,6 +45,7 @@ export class LineWebhookService {
     @Optional() private readonly draftService?: DraftService,
     @Optional() private readonly lineMessagingService?: LineMessagingService,
     @Optional() @Inject(forwardRef(() => ExtractionWorker)) private readonly extractionWorker?: ExtractionWorker,
+    @Optional() private readonly supplyReminderService?: SupplyReminderService,
   ) {}
 
   /**
@@ -357,7 +360,8 @@ export class LineWebhookService {
     const expectedVersionStr = params.get('expected_version');
     const expectedVersion = expectedVersionStr ? parseInt(expectedVersionStr, 10) : undefined;
 
-    if (!action || !draftId) {
+    const knownActions = ['confirm_draft', 'cancel_draft', 'supply_packed', 'quick_record'];
+    if (!action || !knownActions.includes(action)) {
       return {
         eventId: event.webhookEventId,
         eventType: 'postback',
@@ -366,7 +370,22 @@ export class LineWebhookService {
       };
     }
 
-    if (!this.draftService) {
+    // Quick Record guidance postback: reply with instructions and exit without creating drafts
+    if (action === 'quick_record') {
+      const promptText = '請輸入實際照護內容，CareLink 會先整理成草稿，確認後才正式記錄。';
+      if (this.lineMessagingService && event.replyToken) {
+        await this.lineMessagingService.replyTextMessage(event.replyToken, promptText);
+      }
+      return {
+        eventId: event.webhookEventId,
+        eventType: 'postback',
+        status: 'quick_record_prompt_sent',
+        receiptId,
+      };
+    }
+
+    // Draft-related actions require draftId and draftService
+    if ((action === 'confirm_draft' || action === 'cancel_draft') && (!draftId || !this.draftService)) {
       return {
         eventId: event.webhookEventId,
         eventType: 'postback',
@@ -386,7 +405,7 @@ export class LineWebhookService {
     }
 
     const providerId = this.configService.get<string>('LINE_PROVIDER_ID') || 'provider_001';
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user?.findUnique({
       where: {
         line_provider_id_line_sub: {
           line_provider_id: providerId,
@@ -461,6 +480,67 @@ export class LineWebhookService {
           receiptId,
         };
       } catch (err: any) {
+        return {
+          eventId: event.webhookEventId,
+          eventType: 'postback',
+          status: 'postback_failed',
+          receiptId,
+          error: err.message,
+        };
+      }
+    } else if (action === 'supply_packed') {
+      // Supply reminder: Guardian marks item as prepared
+      const supplyTaskId = params.get('id');
+      if (!supplyTaskId || !this.supplyReminderService) {
+        return {
+          eventId: event.webhookEventId,
+          eventType: 'postback',
+          status: 'postback_received',
+          receiptId,
+        };
+      }
+
+      // Resolve LINE source userId → internal User (already done above as `user`)
+      try {
+        await this.supplyReminderService.markPacked(user.id, supplyTaskId);
+
+        this.logger.log(
+          `Supply reminder packed via postback: task=${supplyTaskId.slice(0, 8)} (User=[MASKED])`,
+        );
+
+        // Push confirmation back to guardian
+        if (this.lineMessagingService && lineUserId) {
+          try {
+            const confirmBubble = FlexMessageBuilder.buildConfirmedSuccessFlex(
+              '用品',
+              1,
+              this.configService.get<string>('LINE_MINI_APP_CHANNEL_ID') || '',
+            );
+            // Override the body text for supply context
+            if (confirmBubble.body?.contents?.[0]) {
+              confirmBubble.body.contents[0].text = '✓ 已準備';
+            }
+            if (confirmBubble.body?.contents?.[1]) {
+              confirmBubble.body.contents[1].text = '用品已標記為準備完成';
+            }
+            await this.lineMessagingService.pushFlexMessage(
+              lineUserId,
+              'CareLink 用品已準備',
+              confirmBubble,
+            );
+          } catch (flexErr: any) {
+            this.logger.warn(`Failed to push supply packed confirmation: ${flexErr.message}`);
+          }
+        }
+
+        return {
+          eventId: event.webhookEventId,
+          eventType: 'postback',
+          status: 'confirmed',
+          receiptId,
+        };
+      } catch (err: any) {
+        this.logger.warn(`Supply packed postback failed for ${supplyTaskId}: ${err.message}`);
         return {
           eventId: event.webhookEventId,
           eventType: 'postback',
