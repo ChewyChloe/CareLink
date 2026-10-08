@@ -329,7 +329,7 @@ export class ExtractionWorker implements OnModuleInit, OnModuleDestroy {
 
       // 10.5 Deliver Flex Confirmation Card to LINE user
       const targetLineUser = (payloadRefs as any)?.lineUserId;
-      if (this.lineMessagingService && targetLineUser) {
+      if (this.lineMessagingService && targetLineUser && draft) {
         try {
           const miniAppChannelId = this.configService?.get<string>('LINE_MINI_APP_CHANNEL_ID') || '';
           const childAlias = authorizedChildren.find((c) => c.id === targetChildId)?.displayAlias || '受托幼兒';
@@ -353,6 +353,69 @@ export class ExtractionWorker implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      // 10.6 Handle Extracted Supply Needs (AI candidate -> SupplyDraft -> User confirmation -> SupplyTask)
+      if (extraction.output.supply_needs && extraction.output.supply_needs.length > 0) {
+        for (const sn of extraction.output.supply_needs) {
+          if (sn.temporal_status === 'NEGATED') {
+            this.logger.log(`Supply need for "${sn.item_name}" is NEGATED. Skipping draft creation.`);
+            continue;
+          }
+
+          let supplyDraft: any = null;
+          if (this.prisma.supplyDraft?.create) {
+            try {
+              supplyDraft = await this.prisma.supplyDraft.create({
+                data: {
+                  source_message_id: sourceMessage.id,
+                  child_id: targetChildId,
+                  relationship_id: relationshipId,
+                  created_by: sourceMessage.author_user_id || 'system',
+                  item_name: sn.item_name,
+                  size: sn.size || null,
+                  quantity: sn.quantity || null,
+                  remaining_quantity: sn.remaining_quantity || null,
+                  due_at: sn.due_at ? new Date(sn.due_at) : null,
+                  urgency: sn.urgency || 'NORMAL',
+                  confidence: sn.confidence || 0.9,
+                  missing_fields: sn.missing_fields || [],
+                  temporal_status: sn.temporal_status || 'ACTUAL',
+                  source_span: sn.source_span || null,
+                  status: 'PENDING_CONFIRMATION',
+                  lock_version: 1,
+                  expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                },
+              });
+            } catch (dbErr: any) {
+              this.logger.warn(`Failed to persist SupplyDraft: ${dbErr.message}`);
+            }
+          }
+
+          if (this.lineMessagingService && targetLineUser && supplyDraft) {
+            try {
+              const miniAppChannelId = this.configService?.get<string>('LINE_MINI_APP_CHANNEL_ID') || '';
+              const childAlias = authorizedChildren.find((c) => c.id === targetChildId)?.displayAlias || '受托幼兒';
+              const flexBubble = FlexMessageBuilder.buildSupplyDraftConfirmationFlex({
+                draftId: supplyDraft.id,
+                childAlias,
+                itemName: sn.item_name,
+                size: sn.size,
+                quantity: sn.quantity,
+                remainingQuantity: sn.remaining_quantity,
+                dueAt: sn.due_at,
+                miniAppChannelId,
+              });
+              await this.lineMessagingService.pushFlexMessage(
+                targetLineUser,
+                `CareLink 用品提醒草稿 (${childAlias} · ${sn.item_name})`,
+                flexBubble,
+              );
+            } catch (flexErr: any) {
+              this.logger.warn(`Failed to deliver SupplyDraft Flex to LINE: ${flexErr.message}`);
+            }
+          }
+        }
+      }
+
       // 11. Mark Job SUCCEEDED
       await this.prisma.job.update({
         where: { id: job.id },
@@ -366,7 +429,7 @@ export class ExtractionWorker implements OnModuleInit, OnModuleDestroy {
       return {
         jobId,
         status: 'SUCCEEDED',
-        draftBatchId: draft.id,
+        draftBatchId: draft?.id,
       };
     } catch (aiErr: any) {
       // 12. Retry or Dead Transition

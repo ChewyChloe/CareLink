@@ -1,10 +1,25 @@
-import { Injectable, Logger, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StaticCommerceProvider } from './commerce/static-commerce.provider';
 
 export interface CreateReminderInput {
   item_name: string;
+  size?: string;
   quantity?: string;
+  remaining_quantity?: string;
   due_at: string; // ISO 8601
+  guardian_user_id?: string;
+  draft_id?: string;
+}
+
+export interface CreateSupplyDraftInput {
+  item_name: string;
+  size?: string;
+  quantity?: string;
+  remaining_quantity?: string;
+  due_at?: string;
+  urgency?: string;
+  temporal_status?: string;
   guardian_user_id?: string;
 }
 
@@ -13,8 +28,14 @@ const ALLOWED_ITEM_NAMES = ['尿布', '濕紙巾', '奶粉', '換洗衣物', '�
 @Injectable()
 export class SupplyReminderService {
   private readonly logger = new Logger(SupplyReminderService.name);
+  private readonly commerceProvider: StaticCommerceProvider;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() commerceProvider?: StaticCommerceProvider,
+  ) {
+    this.commerceProvider = commerceProvider || new StaticCommerceProvider();
+  }
 
   /**
    * Creates a supply reminder (SupplyTask) and schedules a SUPPLY_REMINDER Job.
@@ -107,7 +128,10 @@ export class SupplyReminderService {
           created_by: caregiverId,
           assigned_to: targetGuardianUserId!,
           item_name: input.item_name,
+          size: input.size || null,
           quantity: input.quantity || null,
+          remaining_quantity: input.remaining_quantity || null,
+          draft_id: input.draft_id || null,
           due_at: dueAt,
           status: 'PENDING',
           lock_version: 1,
@@ -137,6 +161,228 @@ export class SupplyReminderService {
     });
 
     return result.supplyTask;
+  }
+
+  /**
+   * Creates a SupplyDraft from AI candidate or manual input.
+   * Does NOT write to production SupplyTask.
+   */
+  async createDraft(
+    caregiverId: string,
+    childId: string,
+    input: CreateSupplyDraftInput,
+    sourceMessageId?: string,
+  ) {
+    if (!ALLOWED_ITEM_NAMES.includes(input.item_name)) {
+      throw new BadRequestException(`Invalid item_name. Allowed: ${ALLOWED_ITEM_NAMES.join(', ')}`);
+    }
+
+    const grant = await this.prisma.accessGrant.findFirst({
+      where: {
+        user_id: caregiverId,
+        child_id: childId,
+        role: 'CAREGIVER',
+        revoked_at: null,
+        OR: [{ ends_at: null }, { ends_at: { gt: new Date() } }],
+      },
+    });
+
+    if (!grant || !grant.scopes.includes('HANDOFF_WRITE')) {
+      throw new ForbiddenException('Caregiver does not have HANDOFF_WRITE access');
+    }
+
+    const relationship = await this.prisma.careRelationship.findFirst({
+      where: {
+        child_id: childId,
+        caregiver_user_id: caregiverId,
+        status: 'ACTIVE',
+      },
+    });
+
+    const dueAt = input.due_at ? new Date(input.due_at) : null;
+
+    if (!this.prisma.supplyDraft?.create) {
+      return {
+        id: `draft-${Date.now()}`,
+        item_name: input.item_name,
+        size: input.size || null,
+        quantity: input.quantity || null,
+        remaining_quantity: input.remaining_quantity || null,
+        status: 'PENDING_CONFIRMATION',
+      };
+    }
+
+    return this.prisma.supplyDraft.create({
+      data: {
+        relationship_id: relationship?.id || null,
+        child_id: childId,
+        source_message_id: sourceMessageId || null,
+        created_by: caregiverId,
+        assigned_to: input.guardian_user_id || null,
+        item_name: input.item_name,
+        size: input.size || null,
+        quantity: input.quantity || null,
+        remaining_quantity: input.remaining_quantity || null,
+        due_at: dueAt,
+        urgency: input.urgency || 'NORMAL',
+        temporal_status: input.temporal_status || 'ACTUAL',
+        status: 'PENDING_CONFIRMATION',
+        lock_version: 1,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+    });
+  }
+
+  /**
+   * Confirms a SupplyDraft and transitions it into a production SupplyTask.
+   */
+  async confirmDraft(
+    userId: string,
+    draftId: string,
+    override?: { due_at?: string; quantity?: string; size?: string; guardian_user_id?: string },
+  ) {
+    if (!this.prisma.supplyDraft?.findUnique) {
+      throw new NotFoundException('Supply draft not found');
+    }
+
+    const draft = await this.prisma.supplyDraft.findUnique({
+      where: { id: draftId },
+    });
+
+    if (!draft) {
+      throw new NotFoundException('Supply draft not found');
+    }
+
+    if (draft.status !== 'PENDING_CONFIRMATION') {
+      throw new BadRequestException(`Supply draft is not pending confirmation: ${draft.status}`);
+    }
+
+    if (draft.temporal_status === 'NEGATED') {
+      throw new BadRequestException('Cannot confirm a negated supply draft into a SupplyTask');
+    }
+
+    if (!draft.child_id) {
+      throw new BadRequestException('Draft has no child associated');
+    }
+
+    const dueAtStr =
+      override?.due_at ||
+      (draft.due_at ? draft.due_at.toISOString() : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+
+    // 1. Create production SupplyTask
+    const task = await this.createReminder(userId, draft.child_id, {
+      item_name: draft.item_name,
+      size: override?.size || draft.size || undefined,
+      quantity: override?.quantity || draft.quantity || '1包',
+      remaining_quantity: draft.remaining_quantity || undefined,
+      due_at: dueAtStr,
+      guardian_user_id: override?.guardian_user_id || draft.assigned_to || undefined,
+      draft_id: draft.id,
+    });
+
+    // 2. Mark SupplyDraft as CONFIRMED
+    await this.prisma.supplyDraft.update({
+      where: { id: draftId },
+      data: { status: 'CONFIRMED' },
+    });
+
+    return { draft: { ...draft, status: 'CONFIRMED' }, task };
+  }
+
+  /**
+   * Cancels a pending SupplyDraft.
+   */
+  async cancelDraft(userId: string, draftId: string) {
+    if (!this.prisma.supplyDraft?.findUnique) {
+      throw new NotFoundException('Supply draft not found');
+    }
+
+    const draft = await this.prisma.supplyDraft.findUnique({
+      where: { id: draftId },
+    });
+
+    if (!draft) {
+      throw new NotFoundException('Supply draft not found');
+    }
+
+    if (draft.status !== 'PENDING_CONFIRMATION') {
+      throw new BadRequestException(`Cannot cancel draft in state: ${draft.status}`);
+    }
+
+    return this.prisma.supplyDraft.update({
+      where: { id: draftId },
+      data: { status: 'CANCELLED' },
+    });
+  }
+
+  /**
+   * Lists pending supply drafts for a child.
+   */
+  async listDrafts(userId: string, childId: string) {
+    const grant = await this.prisma.accessGrant.findFirst({
+      where: {
+        user_id: userId,
+        child_id: childId,
+        revoked_at: null,
+        OR: [{ ends_at: null }, { ends_at: { gt: new Date() } }],
+      },
+    });
+
+    if (!grant) {
+      throw new ForbiddenException('No access to this child');
+    }
+
+    if (!this.prisma.supplyDraft?.findMany) {
+      return [];
+    }
+
+    return this.prisma.supplyDraft.findMany({
+      where: {
+        child_id: childId,
+        status: 'PENDING_CONFIRMATION',
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  /**
+   * Gets deterministic commerce recommendations for a given supply task.
+   * Adheres strictly to data minimization (never exposes child personal data).
+   */
+  async getRecommendationsForTask(
+    userId: string,
+    supplyTaskId: string,
+    preferredBrand?: string,
+  ) {
+    const task = await this.prisma.supplyTask.findUnique({
+      where: { id: supplyTaskId },
+      include: { relationship: { select: { child_id: true } } },
+    });
+
+    if (!task) {
+      throw new NotFoundException('Supply task not found');
+    }
+
+    const grant = await this.prisma.accessGrant.findFirst({
+      where: {
+        user_id: userId,
+        child_id: task.relationship.child_id,
+        revoked_at: null,
+        OR: [{ ends_at: null }, { ends_at: { gt: new Date() } }],
+      },
+    });
+
+    if (!grant) {
+      throw new ForbiddenException('No access to this child');
+    }
+
+    return this.commerceProvider.getRecommendations({
+      itemCategory: task.item_name,
+      size: task.size,
+      quantity: task.quantity,
+      dueDate: task.due_at,
+      preferredBrand,
+    });
   }
 
   /**
