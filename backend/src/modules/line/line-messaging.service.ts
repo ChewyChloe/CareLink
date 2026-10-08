@@ -61,6 +61,48 @@ export class LineMessagingService {
   }
 
   /**
+   * Replies with a simple text message using LINE replyToken.
+   */
+  async replyTextMessage(replyToken: string, text: string): Promise<boolean> {
+    const token = this.getAccessToken();
+    if (!token) {
+      this.logger.warn('LINE_CHANNEL_ACCESS_TOKEN missing; reply skipped');
+      return false;
+    }
+
+    try {
+      const res = await fetch(this.replyEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          replyToken,
+          messages: [
+            {
+              type: 'text',
+              text,
+            },
+          ],
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        this.logger.warn(`LINE text reply failed (HTTP ${res.status}): ${errText}`);
+        return false;
+      }
+
+      this.logger.log('LINE text reply sent successfully');
+      return true;
+    } catch (err: any) {
+      this.logger.error(`Error sending LINE text reply: ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
    * Pushes a Flex message directly to a LINE user ID.
    */
   async pushFlexMessage(

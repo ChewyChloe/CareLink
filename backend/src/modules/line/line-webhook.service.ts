@@ -25,7 +25,8 @@ export interface WebhookProcessResult {
     | 'postback_failed'
     | 'unsupported_event'
     | 'missing_source_user'
-    | 'user_not_registered';
+    | 'user_not_registered'
+    | 'quick_record_prompt_sent';
   receiptId?: string;
   sourceMessageId?: string;
   jobId?: string;
@@ -359,12 +360,26 @@ export class LineWebhookService {
     const expectedVersionStr = params.get('expected_version');
     const expectedVersion = expectedVersionStr ? parseInt(expectedVersionStr, 10) : undefined;
 
-    const knownActions = ['confirm_draft', 'cancel_draft', 'supply_packed'];
+    const knownActions = ['confirm_draft', 'cancel_draft', 'supply_packed', 'quick_record'];
     if (!action || !knownActions.includes(action)) {
       return {
         eventId: event.webhookEventId,
         eventType: 'postback',
         status: 'postback_received',
+        receiptId,
+      };
+    }
+
+    // Quick Record guidance postback: reply with instructions and exit without creating drafts
+    if (action === 'quick_record') {
+      const promptText = '請輸入實際照護內容，CareLink 會先整理成草稿，確認後才正式記錄。';
+      if (this.lineMessagingService && event.replyToken) {
+        await this.lineMessagingService.replyTextMessage(event.replyToken, promptText);
+      }
+      return {
+        eventId: event.webhookEventId,
+        eventType: 'postback',
+        status: 'quick_record_prompt_sent',
         receiptId,
       };
     }
