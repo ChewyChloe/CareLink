@@ -77,6 +77,7 @@ export class AiService {
       schemaVersion: extractionResult.schemaVersion,
       latencyMs: extractionResult.latencyMs,
       eventCount: extractionResult.output.events.length,
+      supplyNeedCount: extractionResult.output.supply_needs?.length || 0,
       requiresUserInput: extractionResult.output.requires_user_input,
     });
 

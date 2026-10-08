@@ -80,11 +80,45 @@ export const ExtractedCareEventSchema = z.object({
 export type ExtractedCareEvent = z.infer<typeof ExtractedCareEventSchema>;
 
 /**
+ * Standardized supply item categories.
+ * Models are forbidden from inventing arbitrary item categories.
+ */
+export const AllowedSupplyCategories = [
+  '尿布',
+  '濕紙巾',
+  '奶粉',
+  '換洗衣物',
+  '其他',
+] as const;
+
+export type AllowedSupplyCategory = (typeof AllowedSupplyCategories)[number];
+
+/**
+ * Single extracted supply need candidate for human confirmation.
+ */
+export const ExtractedSupplyNeedSchema = z.object({
+  item_name: z.enum(AllowedSupplyCategories).describe('Standardized supply category'),
+  size: z.string().nullable().default(null).describe('Size e.g. NB, S, M, L, XL or null'),
+  quantity: z.string().nullable().default(null).describe('Requested quantity e.g. 1包, 2罐 or null'),
+  remaining_quantity: z.string().nullable().default(null).describe('Remaining quantity e.g. 5片, 剩半罐 or null'),
+  due_at: z.string().nullable().default(null).describe('ISO 8601 string or null if unspecified'),
+  urgency: z.enum(['LOW', 'NORMAL', 'HIGH']).default('NORMAL').describe('Urgency level'),
+  missing_fields: z.array(z.string()).default([]).describe('Missing fields such as due_at or quantity'),
+  confidence: z.number().min(0).max(1).default(0.9).describe('Confidence score between 0 and 1'),
+  source_span: z.string().optional().describe('Original snippet from message'),
+  temporal_status: z.enum(TemporalStatuses).default('ACTUAL').describe('ACTUAL, PLANNED, NEGATED, or UNCERTAIN'),
+});
+
+export type ExtractedSupplyNeed = z.infer<typeof ExtractedSupplyNeedSchema>;
+
+/**
  * Root structured extraction output schema.
+ * Supports both care_events (aliased as events for backward compatibility) and supply_needs.
  */
 export const CareExtractionOutputSchema = z.object({
   schema_version: z.string().default('v1'),
   events: z.array(ExtractedCareEventSchema).default([]),
+  supply_needs: z.array(ExtractedSupplyNeedSchema).default([]),
   requires_user_input: z.boolean().default(false).describe('True if missing fields, multi-child ambiguity, or uncertainty exists'),
 });
 
@@ -145,6 +179,29 @@ export const GeminiCareExtractionJsonSchema = {
           },
         },
         required: ['event_type', 'temporal_status', 'source_span', 'missing_fields'],
+      },
+    },
+    supply_needs: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          item_name: {
+            type: 'STRING',
+            enum: [...AllowedSupplyCategories],
+            description: 'Supply item category',
+          },
+          size: { type: 'STRING', nullable: true, description: 'Size e.g. M, L, NB' },
+          quantity: { type: 'STRING', nullable: true, description: 'Requested quantity e.g. 1包' },
+          remaining_quantity: { type: 'STRING', nullable: true, description: 'Remaining amount e.g. 5片' },
+          due_at: { type: 'STRING', nullable: true, description: 'Due date ISO string or null' },
+          urgency: { type: 'STRING', enum: ['LOW', 'NORMAL', 'HIGH'], description: 'Urgency' },
+          missing_fields: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Missing fields e.g. due_at' },
+          confidence: { type: 'NUMBER', description: 'Confidence score' },
+          source_span: { type: 'STRING', description: 'Source text' },
+          temporal_status: { type: 'STRING', enum: [...TemporalStatuses], description: 'Temporal status' },
+        },
+        required: ['item_name', 'urgency', 'missing_fields', 'confidence', 'temporal_status'],
       },
     },
   },

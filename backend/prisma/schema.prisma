@@ -35,6 +35,8 @@ model User {
   care_event_revisions      CareEventRevision[]   @relation("RevisionConfirmedBy")
   supply_tasks_created      SupplyTask[]          @relation("SupplyTaskCreator")
   supply_tasks_assigned     SupplyTask[]          @relation("SupplyTaskAssignee")
+  supply_drafts_created     SupplyDraft[]         @relation("SupplyDraftCreator")
+  supply_drafts_assigned    SupplyDraft[]         @relation("SupplyDraftAssignee")
   invitations_sent          Invitation[]          @relation("InviterUser")
   invitations_accepted      Invitation[]          @relation("AcceptedUser")
   invitations_approved      Invitation[]          @relation("ApprovedUser")
@@ -68,6 +70,7 @@ model Child {
   care_events     CareEvent[]
   daily_log_views DailyLogView[]
   guardian_instructions GuardianInstruction[]
+  supply_drafts   SupplyDraft[]
 
   @@map("children")
 }
@@ -111,6 +114,7 @@ model CareRelationship {
   care_events       CareEvent[]
   attendance_sessions AttendanceSession[]
   supply_tasks      SupplyTask[]
+  supply_drafts     SupplyDraft[]
 
   @@map("care_relationships")
 }
@@ -204,6 +208,7 @@ model SourceMessage {
   draft_batches   DraftBatch[]
   supply_tasks    SupplyTask[]
   care_events     CareEvent[]
+  supply_drafts   SupplyDraft[]
 
   @@unique([channel_id, line_message_id])
   @@map("source_messages")
@@ -329,10 +334,13 @@ model SupplyTask {
   id                  String            @id @default(uuid()) @db.Uuid
   relationship_id     String            @db.Uuid
   source_message_id   String?           @db.Uuid
+  draft_id            String?           @db.Uuid
   created_by          String            @db.Uuid
   assigned_to         String            @db.Uuid
   item_name           String
+  size                String?
   quantity            String?
+  remaining_quantity  String?
   due_at              DateTime?         @db.Timestamptz
   status              String            @default("PENDING") // PENDING, PACKED, RECEIVED, CANCELLED
   acknowledged_at     DateTime?         @db.Timestamptz
@@ -344,10 +352,44 @@ model SupplyTask {
 
   relationship        CareRelationship  @relation(fields: [relationship_id], references: [id])
   source_message      SourceMessage?    @relation(fields: [source_message_id], references: [id], onDelete: SetNull)
+  supply_draft        SupplyDraft?      @relation(fields: [draft_id], references: [id], onDelete: SetNull)
   creator             User              @relation("SupplyTaskCreator", fields: [created_by], references: [id])
   assignee            User              @relation("SupplyTaskAssignee", fields: [assigned_to], references: [id])
 
   @@map("supply_tasks")
+}
+
+model SupplyDraft {
+  id                  String            @id @default(uuid()) @db.Uuid
+  relationship_id     String?           @db.Uuid
+  child_id            String?           @db.Uuid
+  source_message_id   String?           @db.Uuid
+  created_by          String            @db.Uuid
+  assigned_to         String?           @db.Uuid
+  item_name           String
+  size                String?
+  quantity            String?
+  remaining_quantity  String?
+  due_at              DateTime?         @db.Timestamptz
+  urgency             String            @default("NORMAL") // LOW, NORMAL, HIGH
+  confidence          Float             @default(0.9)
+  missing_fields      String[]
+  temporal_status     String            @default("ACTUAL") // ACTUAL, PLANNED, NEGATED, UNCERTAIN
+  source_span         String?
+  status              String            @default("PENDING_CONFIRMATION") // PENDING_CONFIRMATION, CONFIRMED, CANCELLED, EXPIRED
+  lock_version        Int               @default(1)
+  expires_at          DateTime          @db.Timestamptz
+  created_at          DateTime          @default(now()) @db.Timestamptz
+  updated_at          DateTime          @updatedAt @db.Timestamptz
+
+  relationship        CareRelationship? @relation(fields: [relationship_id], references: [id], onDelete: SetNull)
+  child               Child?            @relation(fields: [child_id], references: [id], onDelete: SetNull)
+  source_message      SourceMessage?    @relation(fields: [source_message_id], references: [id], onDelete: SetNull)
+  creator             User              @relation("SupplyDraftCreator", fields: [created_by], references: [id])
+  assignee            User?             @relation("SupplyDraftAssignee", fields: [assigned_to], references: [id])
+  supply_tasks        SupplyTask[]
+
+  @@map("supply_drafts")
 }
 
 // -----------------------------------------------------------------------------

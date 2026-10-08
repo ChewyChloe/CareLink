@@ -360,7 +360,14 @@ export class LineWebhookService {
     const expectedVersionStr = params.get('expected_version');
     const expectedVersion = expectedVersionStr ? parseInt(expectedVersionStr, 10) : undefined;
 
-    const knownActions = ['confirm_draft', 'cancel_draft', 'supply_packed', 'quick_record'];
+    const knownActions = [
+      'confirm_draft',
+      'cancel_draft',
+      'supply_packed',
+      'confirm_supply_draft',
+      'cancel_supply_draft',
+      'quick_record',
+    ];
     if (!action || !knownActions.includes(action)) {
       return {
         eventId: event.webhookEventId,
@@ -421,6 +428,83 @@ export class LineWebhookService {
         status: 'user_not_registered',
         receiptId,
       };
+    }
+
+    if (action === 'confirm_supply_draft') {
+      const supplyDraftId = params.get('id');
+      if (!supplyDraftId || !this.supplyReminderService) {
+        return {
+          eventId: event.webhookEventId,
+          eventType: 'postback',
+          status: 'postback_received',
+          receiptId,
+        };
+      }
+
+      try {
+        const result = await this.supplyReminderService.confirmDraft(user.id, supplyDraftId);
+        this.logger.log(`Supply draft confirmed via postback: draft=${supplyDraftId.slice(0, 8)}`);
+
+        if (this.lineMessagingService && lineUserId) {
+          try {
+            const confirmBubble = FlexMessageBuilder.buildConfirmedSuccessFlex(
+              '用品提醒',
+              1,
+              this.configService.get<string>('LINE_MINI_APP_CHANNEL_ID') || '',
+            );
+            if (confirmBubble.body?.contents?.[0]) {
+              confirmBubble.body.contents[0].text = '✓ 用品提醒已建立';
+            }
+            if (confirmBubble.body?.contents?.[1]) {
+              confirmBubble.body.contents[1].text = `已將「${result.task.item_name}」排入提醒時程`;
+            }
+            await this.lineMessagingService.pushFlexMessage(
+              lineUserId,
+              'CareLink 用品提醒已排程',
+              confirmBubble,
+            );
+          } catch (flexErr: any) {
+            this.logger.warn(`Failed to push supply draft confirmation: ${flexErr.message}`);
+          }
+        }
+
+        return {
+          eventId: event.webhookEventId,
+          eventType: 'postback',
+          status: 'confirmed',
+          receiptId,
+        };
+      } catch (err: any) {
+        this.logger.warn(`Supply draft confirmation postback failed: ${err.message}`);
+        return {
+          eventId: event.webhookEventId,
+          eventType: 'postback',
+          status: 'postback_failed',
+          receiptId,
+          error: err.message,
+        };
+      }
+    } else if (action === 'cancel_supply_draft') {
+      const supplyDraftId = params.get('id');
+      if (supplyDraftId && this.supplyReminderService) {
+        try {
+          await this.supplyReminderService.cancelDraft(user.id, supplyDraftId);
+          return {
+            eventId: event.webhookEventId,
+            eventType: 'postback',
+            status: 'cancelled',
+            receiptId,
+          };
+        } catch (err: any) {
+          return {
+            eventId: event.webhookEventId,
+            eventType: 'postback',
+            status: 'postback_failed',
+            receiptId,
+            error: err.message,
+          };
+        }
+      }
     }
 
     if (action === 'confirm_draft') {

@@ -21,6 +21,13 @@ class CreateSupplyReminderBody {
   guardian_user_id: string;
 }
 
+class ConfirmSupplyDraftBody {
+  due_at?: string;
+  quantity?: string;
+  size?: string;
+  guardian_user_id?: string;
+}
+
 @Controller('supply-reminders')
 @UseGuards(AuthGuard)
 export class SupplyReminderController {
@@ -28,6 +35,63 @@ export class SupplyReminderController {
     private readonly supplyReminderService: SupplyReminderService,
     private readonly commerceLinkResolver: CommerceLinkResolver,
   ) {}
+
+  /**
+   * List pending supply drafts for a child.
+   * GET /api/supply-reminders/drafts?child_id=...
+   */
+  @Get('drafts')
+  async listDrafts(
+    @Query('child_id') childId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (!childId) {
+      throw new BadRequestException('child_id query parameter is required');
+    }
+    return this.supplyReminderService.listDrafts(user.id, childId);
+  }
+
+  /**
+   * Confirm an AI/manual supply draft into an official SupplyTask.
+   * POST /api/supply-reminders/drafts/:id/confirm
+   */
+  @Post('drafts/:id/confirm')
+  async confirmDraft(
+    @Param('id') draftId: string,
+    @Body() body: ConfirmSupplyDraftBody,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.supplyReminderService.confirmDraft(user.id, draftId, body);
+  }
+
+  /**
+   * Cancel an AI supply draft.
+   * POST /api/supply-reminders/drafts/:id/cancel
+   */
+  @Post('drafts/:id/cancel')
+  async cancelDraft(
+    @Param('id') draftId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.supplyReminderService.cancelDraft(user.id, draftId);
+  }
+
+  /**
+   * Get deterministic commerce recommendations for a specific supply task.
+   * GET /api/supply-reminders/:id/recommendations
+   */
+  @Get(':id/recommendations')
+  async getRecommendations(
+    @Param('id') supplyTaskId: string,
+    @Query('preferred_brand') preferredBrand: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.supplyReminderService.getRecommendationsForTask(
+      user.id,
+      supplyTaskId,
+      preferredBrand,
+    );
+  }
 
   /**
    * Create a supply reminder.

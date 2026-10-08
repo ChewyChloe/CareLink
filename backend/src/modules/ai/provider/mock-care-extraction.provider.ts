@@ -8,6 +8,8 @@ import {
   CareExtractionOutput,
   CareExtractionOutputSchema,
   ExtractedCareEvent,
+  ExtractedSupplyNeed,
+  AllowedSupplyCategory,
   AllowedEventType,
   TemporalStatus,
 } from '../schemas/care-extraction.schema';
@@ -39,6 +41,7 @@ export class MockCareExtractionProvider implements CareExtractionProvider {
         output: {
           schema_version: 'v1',
           events: [],
+          supply_needs: [],
           requires_user_input: false,
         },
         promptVersion: CARE_EVENT_EXTRACTION_PROMPT_METADATA.promptVersion,
@@ -48,16 +51,19 @@ export class MockCareExtractionProvider implements CareExtractionProvider {
       };
     }
 
-    // 2. Check for garbage / non-care noise
+    // 2. Check for garbage / non-care noise (unless it mentions supply items)
+    const isSupplyMention = /尿布|紙尿褲|濕紙巾|柔濕巾|奶粉|換洗衣物|衣服/.test(text);
     if (
       /^[a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?\s]+$/.test(text) &&
       !/\d{1,2}[:點]\d{2}/.test(text) &&
-      !/ml|cc|oz/i.test(text)
+      !/ml|cc|oz/i.test(text) &&
+      !isSupplyMention
     ) {
       return {
         output: {
           schema_version: 'v1',
           events: [],
+          supply_needs: [],
           requires_user_input: false,
         },
         promptVersion: CARE_EVENT_EXTRACTION_PROMPT_METADATA.promptVersion,
@@ -67,12 +73,16 @@ export class MockCareExtractionProvider implements CareExtractionProvider {
       };
     }
 
-    // Pure observation sentences without childcare actions (e.g. "今天天氣真好", "今天完全沒有發燒，活動力良好")
-    if (/今天天氣真好|早安貼圖/i.test(text) || (/沒有發燒/i.test(text) && !/喝|吃|睡|接/i.test(text))) {
+    // Pure observation sentences without childcare actions or supplies
+    if (
+      (/今天天氣真好|早安貼圖/i.test(text) || (/沒有發燒/i.test(text) && !/喝|吃|睡|接/i.test(text))) &&
+      !isSupplyMention
+    ) {
       return {
         output: {
           schema_version: 'v1',
           events: [],
+          supply_needs: [],
           requires_user_input: false,
         },
         promptVersion: CARE_EVENT_EXTRACTION_PROMPT_METADATA.promptVersion,
@@ -107,7 +117,7 @@ export class MockCareExtractionProvider implements CareExtractionProvider {
       return 'ACTUAL';
     };
 
-    // 3. Multi-child split or sentence split (e.g. "哥哥睡了，妹妹還沒" or "11:40喝150，13:10睡著")
+    // 3. Multi-event and care event parsing
     const segments = text.split(/[,，;；\n]+/).filter(Boolean);
 
     for (const seg of segments) {
@@ -292,13 +302,24 @@ export class MockCareExtractionProvider implements CareExtractionProvider {
       }
     }
 
-    if (events.some((e) => e.missing_fields.length > 0 || e.temporal_status === 'UNCERTAIN')) {
+    // 4. Extract Supply Needs
+    const { supplyNeeds, requiresInput: supplyRequiresInput } = this.extractSupplyNeeds(
+      text,
+      input.referenceDate,
+    );
+
+    if (
+      events.some((e) => e.missing_fields.length > 0 || e.temporal_status === 'UNCERTAIN') ||
+      supplyRequiresInput ||
+      supplyNeeds.some((s) => s.missing_fields.length > 0 || s.temporal_status === 'UNCERTAIN')
+    ) {
       requiresUserInput = true;
     }
 
     const output: CareExtractionOutput = {
       schema_version: 'v1',
       events,
+      supply_needs: supplyNeeds,
       requires_user_input: requiresUserInput,
     };
 
@@ -313,4 +334,136 @@ export class MockCareExtractionProvider implements CareExtractionProvider {
       latencyMs: Date.now() - startTime,
     };
   }
+
+  /**
+   * Deterministic extraction for childcare supply needs and inventory alerts.
+   */
+  private extractSupplyNeeds(
+    text: string,
+    referenceDate: string,
+  ): { supplyNeeds: ExtractedSupplyNeed[]; requiresInput: boolean } {
+    const supplyNeeds: ExtractedSupplyNeed[] = [];
+    let requiresInput = false;
+
+    // Check if message discusses supplies
+    const supplyKeywords = ['尿布', '紙尿褲', '濕紙巾', '柔濕巾', '奶粉', '換洗衣物', '衣服', '包屁衣', '紗布衣'];
+    const hasSupplyMention = supplyKeywords.some((kw) => text.includes(kw));
+
+    if (!hasSupplyMention) {
+      return { supplyNeeds: [], requiresInput: false };
+    }
+
+    // Determine category
+    let itemName: AllowedSupplyCategory = '其他';
+    if (/尿布|紙尿褲/.test(text)) itemName = '尿布';
+    else if (/濕紙巾|柔濕巾/.test(text)) itemName = '濕紙巾';
+    else if (/奶粉/.test(text)) itemName = '奶粉';
+    else if (/換洗衣物|衣物|衣服|包屁衣|紗布衣/.test(text)) itemName = '換洗衣物';
+
+    // Determine temporal status
+    let temporalStatus: TemporalStatus = 'ACTUAL';
+    let confidence = 0.95;
+
+    if (/不用|不需要|別帶|免帶|不用補/.test(text)) {
+      temporalStatus = 'NEGATED';
+    } else if (/可能|好像|大概|不確定/.test(text)) {
+      temporalStatus = 'UNCERTAIN';
+      confidence = 0.6;
+      requiresInput = true;
+    } else if (/明天|後天|等等|預計|下週/.test(text)) {
+      temporalStatus = 'PLANNED';
+    }
+
+    // Extract size (e.g. M號, L號, NB, S, XL) - must NOT match "ml" (volume)
+    let size: string | null = null;
+    const sizeMatch = text.match(/(?<!\d)(NB|XXL|XL|[SML])\s*號/i) || text.match(/(?<!\d)(NB|XXL|XL|[SML])\b(?!l|L)/i);
+    if (sizeMatch) {
+      size = sizeMatch[1].toUpperCase();
+    }
+
+    // Extract quantity (e.g. 1包, 一包, 2罐, 兩罐)
+    let quantity: string | null = null;
+    const qtyMatch = text.match(/(?:補|帶|買|準備|需要)?\s*([0-9一二兩三四五六七八九十]+)\s*(包|罐|盒|件|條|袋|組)/);
+    if (qtyMatch) {
+      const numStr = qtyMatch[1]
+        .replace('一', '1')
+        .replace('兩', '2')
+        .replace('二', '2')
+        .replace('三', '3')
+        .replace('四', '4')
+        .replace('五', '5');
+      quantity = `${numStr}${qtyMatch[2]}`;
+    }
+
+    // Extract remaining quantity (e.g. 剩5片, 只剩5片, 剩約半罐)
+    let remainingQuantity: string | null = null;
+    const remMatch = text.match(/(?:剩|只剩|剩下|約)\s*([約0-9一二兩三四五六七八九十半]+\s*(?:片|抽|罐|包|件|次)?)/);
+    if (remMatch && remMatch[1]) {
+      const trimmedRem = remMatch[1].trim();
+      if (trimmedRem && !trimmedRem.startsWith('1包') && !trimmedRem.startsWith('一包')) {
+        remainingQuantity = trimmedRem;
+      }
+    }
+
+    // Calculate due_at
+    let dueAt: string | null = null;
+    const missingFields: string[] = [];
+
+    const baseRef = referenceDate ? new Date(referenceDate) : new Date();
+    if (isNaN(baseRef.getTime())) {
+      baseRef.setTime(Date.now());
+    }
+
+    if (/明天/.test(text)) {
+      const tomorrow = new Date(baseRef);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const y = tomorrow.getFullYear();
+      const m = String(tomorrow.getMonth() + 1).padStart(2, '0');
+      const d = String(tomorrow.getDate()).padStart(2, '0');
+      dueAt = `${y}-${m}-${d}T09:00:00.000Z`;
+    } else if (/後天/.test(text)) {
+      const afterTomorrow = new Date(baseRef);
+      afterTomorrow.setDate(afterTomorrow.getDate() + 2);
+      const y = afterTomorrow.getFullYear();
+      const m = String(afterTomorrow.getMonth() + 1).padStart(2, '0');
+      const d = String(afterTomorrow.getDate()).padStart(2, '0');
+      dueAt = `${y}-${m}-${d}T09:00:00.000Z`;
+    } else if (/下週/.test(text)) {
+      const nextWeek = new Date(baseRef);
+      nextWeek.setDate(nextWeek.getDate() + 7);
+      const y = nextWeek.getFullYear();
+      const m = String(nextWeek.getMonth() + 1).padStart(2, '0');
+      const d = String(nextWeek.getDate()).padStart(2, '0');
+      dueAt = `${y}-${m}-${d}T09:00:00.000Z`;
+    } else if (temporalStatus !== 'NEGATED') {
+      // Due date is missing!
+      dueAt = null;
+      missingFields.push('due_at');
+      requiresInput = true;
+    }
+
+    // Urgency
+    let urgency: 'LOW' | 'NORMAL' | 'HIGH' = 'NORMAL';
+    if (/急|立刻|馬上|底限/.test(text) || (remainingQuantity && /^[1-3]片/.test(remainingQuantity))) {
+      urgency = 'HIGH';
+    } else if (/慢慢|不急|下個月/.test(text)) {
+      urgency = 'LOW';
+    }
+
+    supplyNeeds.push({
+      item_name: itemName,
+      size,
+      quantity,
+      remaining_quantity: remainingQuantity,
+      due_at: dueAt,
+      urgency,
+      missing_fields: missingFields,
+      confidence,
+      source_span: text,
+      temporal_status: temporalStatus,
+    });
+
+    return { supplyNeeds, requiresInput };
+  }
 }
+

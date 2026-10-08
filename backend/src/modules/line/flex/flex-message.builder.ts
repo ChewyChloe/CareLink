@@ -721,6 +721,196 @@ export class FlexMessageBuilder {
   }
 
   /**
+   * Generates a LINE Flex Message bubble container for an AI Supply Draft confirmation.
+   * Prompts the caregiver to confirm, modify, or cancel the draft before creating a SupplyTask.
+   */
+  public static buildSupplyDraftConfirmationFlex(params: {
+    draftId: string;
+    childAlias?: string;
+    itemName: string;
+    size?: string | null;
+    quantity?: string | null;
+    remainingQuantity?: string | null;
+    dueAt?: string | Date | null;
+    miniAppChannelId?: string;
+  }): Record<string, any> {
+    const { draftId, childAlias, itemName, size, quantity, remainingQuantity, dueAt, miniAppChannelId } = params;
+
+    const childLabel = childAlias || '幼兒';
+    const liffBase = miniAppChannelId ? `https://liff.line.me/${miniAppChannelId}` : '';
+    const modifyUrl = liffBase ? `${liffBase}/handoff?draft_id=${draftId}` : 'https://line.me';
+
+    let friendlyDue = '明天';
+    if (dueAt) {
+      try {
+        friendlyDue = this.formatFriendlyDate(dueAt);
+      } catch {
+        friendlyDue = '明天';
+      }
+    }
+
+    const bodyContents: any[] = [
+      // Brand Header
+      {
+        type: 'box',
+        layout: 'horizontal',
+        contents: [
+          {
+            type: 'text',
+            text: 'CareLink',
+            weight: 'bold',
+            size: 'xs',
+            color: '#56665B',
+            flex: 4,
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#E8F5E9',
+            cornerRadius: 'md',
+            paddingStart: 'sm',
+            paddingEnd: 'sm',
+            paddingTop: 'xs',
+            paddingBottom: 'xs',
+            contents: [
+              {
+                type: 'text',
+                text: '用品提醒草稿',
+                size: 'xxs',
+                color: '#2E7D32',
+                align: 'center',
+                weight: 'bold',
+              },
+            ],
+          },
+        ],
+      },
+      // Title
+      {
+        type: 'text',
+        text: `${childLabel} · ${itemName}${size ? ` (${size}號)` : ''}`,
+        weight: 'bold',
+        size: 'md',
+        color: '#293C32',
+        margin: 'lg',
+        wrap: true,
+      },
+      // Details Box
+      {
+        type: 'box',
+        layout: 'vertical',
+        margin: 'md',
+        spacing: 'sm',
+        backgroundColor: '#F7F9F6',
+        paddingAll: 'md',
+        cornerRadius: 'md',
+        contents: [
+          ...(remainingQuantity
+            ? [
+                {
+                  type: 'box',
+                  layout: 'horizontal',
+                  contents: [
+                    { type: 'text', text: '剩餘庫存', size: 'xs', color: '#6D776C', flex: 3 },
+                    { type: 'text', text: remainingQuantity, size: 'xs', color: '#293C32', weight: 'bold', flex: 5 },
+                  ],
+                },
+              ]
+            : []),
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '建議補充', size: 'xs', color: '#6D776C', flex: 3 },
+              { type: 'text', text: quantity || '1包', size: 'xs', color: '#293C32', weight: 'bold', flex: 5 },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: '需求期限', size: 'xs', color: '#6D776C', flex: 3 },
+              { type: 'text', text: friendlyDue, size: 'xs', color: '#855316', weight: 'bold', flex: 5 },
+            ],
+          },
+        ],
+      },
+      {
+        type: 'text',
+        text: '確認後將排程推播給家長，AI 不會直接建立未經確認的任務。',
+        size: 'xxs',
+        color: '#6D776C',
+        margin: 'md',
+        wrap: true,
+      },
+    ];
+
+    return {
+      type: 'bubble',
+      size: 'kilo',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: 'lg',
+        backgroundColor: '#FFFFFF',
+        contents: bodyContents,
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: 'md',
+        backgroundColor: '#FFFFFF',
+        contents: [
+          // Confirm Draft
+          {
+            type: 'button',
+            style: 'primary',
+            color: '#466B53',
+            height: 'sm',
+            action: {
+              type: 'postback',
+              label: '確認提醒',
+              data: `action=confirm_supply_draft&id=${draftId}`,
+              displayText: `確認建立${itemName}提醒`,
+            },
+          },
+          // Modify / Cancel row
+          {
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'sm',
+            contents: [
+              {
+                type: 'button',
+                style: 'secondary',
+                height: 'sm',
+                action: {
+                  type: 'uri',
+                  label: '修改',
+                  uri: modifyUrl,
+                },
+              },
+              {
+                type: 'button',
+                style: 'link',
+                color: '#BA1A1A',
+                height: 'sm',
+                action: {
+                  type: 'postback',
+                  label: '取消',
+                  data: `action=cancel_supply_draft&id=${draftId}`,
+                  displayText: '取消此用品提醒草稿',
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+
+  /**
    * Generates a LINE Flex Message bubble container for a supply reminder push to Guardian.
    * Uses Tender Bloom palette consistent with existing CareLink Flex messages.
    */
@@ -728,10 +918,12 @@ export class FlexMessageBuilder {
     childAlias: string;
     itemName: string;
     note: string;
+    size?: string | null;
     supplyTaskId: string;
-    commerceUrl: string | null;
+    commerceUrl?: string | null;
+    miniAppChannelId?: string;
   }): Record<string, any> {
-    const { childAlias, itemName, note, supplyTaskId, commerceUrl } = params;
+    const { childAlias, itemName, note, size, supplyTaskId, commerceUrl, miniAppChannelId } = params;
 
     const bodyContents: any[] = [
       // Brand header
@@ -779,10 +971,10 @@ export class FlexMessageBuilder {
         margin: 'lg',
         wrap: true,
       },
-      // Note
+      // Note & Size details
       {
         type: 'text',
-        text: note,
+        text: `${size ? `尺寸：${size} · ` : ''}${note}`,
         size: 'sm',
         color: '#56665B',
         margin: 'sm',
@@ -797,7 +989,7 @@ export class FlexMessageBuilder {
       // Helper text
       {
         type: 'text',
-        text: '老師提醒您準備以上用品',
+        text: '今天需要準備，老師提醒您準備以上用品',
         size: 'xxs',
         color: '#6D776C',
         align: 'center',
@@ -805,9 +997,14 @@ export class FlexMessageBuilder {
       },
     ];
 
+    const liffBase = miniAppChannelId ? `https://liff.line.me/${miniAppChannelId}` : '';
+    const commerceOptionsUrl = liffBase
+      ? `${liffBase}/handoff?task_id=${supplyTaskId}&action=commerce`
+      : commerceUrl || null;
+
     // Footer actions
     const footerContents: any[] = [
-      // Primary: 已經準備好了
+      // Primary: 我已準備
       {
         type: 'button',
         style: 'primary',
@@ -815,24 +1012,23 @@ export class FlexMessageBuilder {
         height: 'sm',
         action: {
           type: 'postback',
-          label: '已經準備好了',
+          label: '我已準備',
           data: `action=supply_packed&id=${supplyTaskId}`,
-          displayText: '已經準備好了',
+          displayText: '我已準備',
         },
       },
     ];
 
-    // Secondary: commerce link (only if URL is configured)
-    if (commerceUrl) {
+    if (commerceOptionsUrl) {
       footerContents.push({
         type: 'button',
         style: 'link',
-        color: '#56665B',
+        color: '#2E7D32',
         height: 'sm',
         action: {
           type: 'uri',
-          label: `前往購買${itemName}`,
-          uri: commerceUrl,
+          label: '查看購買選項',
+          uri: commerceOptionsUrl,
         },
       });
     }
