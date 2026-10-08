@@ -42,5 +42,6 @@ pgdata/
 .env.local
 
 .cache/
+scratch/
 
 比賽資訊.md

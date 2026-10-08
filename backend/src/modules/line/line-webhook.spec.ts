@@ -419,6 +419,39 @@ describe('Stage 2: LINE Messaging API Webhook Tests', () => {
       expect(jobsTable.size).toBe(0);
     });
 
+    it('Priority 2: should handle quick_record postback with prompt text and zero jobs/drafts', async () => {
+      const mockMessaging = {
+        replyTextMessage: jest.fn().mockResolvedValue(true),
+      };
+      (webhookService as any).lineMessagingService = mockMessaging;
+
+      const payload: LineWebhookPayload = {
+        destination: 'Utest_bot_channel',
+        events: [
+          {
+            type: 'postback',
+            mode: 'active',
+            timestamp: 1000,
+            source: { type: 'user', userId: 'U123' },
+            replyToken: 'test_reply_token_qr',
+            webhookEventId: 'evt_quick_record_1',
+            deliveryContext: { isRedelivery: false },
+            postback: { data: 'action=quick_record' },
+          },
+        ],
+      };
+
+      const res = await webhookService.handleWebhook(payload);
+      expect(res[0].status).toBe('quick_record_prompt_sent');
+      expect(mockMessaging.replyTextMessage).toHaveBeenCalledWith(
+        'test_reply_token_qr',
+        '請輸入實際照護內容，CareLink 會先整理成草稿，確認後才正式記錄。',
+      );
+      // Zero jobs or source messages created!
+      expect(jobsTable.size).toBe(0);
+      expect(sourceMessagesTable.size).toBe(0);
+    });
+
     it('should safely record minimal receipt for unsupported event without crashing or queuing jobs', async () => {
       const payload: LineWebhookPayload = {
         destination: 'Utest_bot_channel',
