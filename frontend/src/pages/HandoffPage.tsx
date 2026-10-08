@@ -636,10 +636,17 @@ export function HandoffPage() {
                     <span className="material-symbols-outlined text-[18px]">shopping_bag</span>
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-gray-900">
-                      智慧補貨推薦 · {selectedTaskForRec.item_name} {selectedTaskForRec.size ? `(${selectedTaskForRec.size} 號)` : ''}
-                    </h3>
-                    <p className="text-[11px] text-gray-500">依時效、單價與偏好排序之可信商城選項</p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="font-bold text-sm text-gray-900">
+                        智慧補貨推薦 · {selectedTaskForRec.item_name} {selectedTaskForRec.size ? `(${selectedTaskForRec.size} 號)` : ''}
+                      </h3>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        DEMO DATA 示範資料
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-500">
+                      展示用靜態目錄（更新時間：2026-10-08）· 實際價格與優惠以商家頁面為準
+                    </p>
                   </div>
                 </div>
                 <button
@@ -653,6 +660,22 @@ export function HandoffPage() {
 
               {/* Modal Body */}
               <div className="p-4 overflow-y-auto flex flex-col gap-3">
+                {/* Formula Suspension Notice */}
+                {selectedTaskForRec.item_name === '奶粉' && (
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 flex flex-col gap-1.5">
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-amber-800">
+                      <span className="material-symbols-outlined text-[16px] text-amber-600">health_and_safety</span>
+                      配方奶粉商業推薦已暫停（嬰幼兒安全規範）
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      依據嬰幼兒安全規範，競賽 MVP 暫停配方奶粉之商業比價與品牌商品推薦。奶粉補貨仍可正常設定用品提醒，建議家長依小兒科醫師專業指引或常規慣用配方選購。
+                    </p>
+                    <div className="text-[10px] text-gray-500 font-medium">
+                      ※ Commerce MVP 目前僅提供尿布、濕紙巾、換洗衣物等低風險用品推薦。
+                    </div>
+                  </div>
+                )}
+
                 {loadingRecs ? (
                   <div className="py-12 text-center text-xs text-gray-500">
                     正在載入精選補貨推薦...
@@ -667,7 +690,7 @@ export function HandoffPage() {
                         >
                           {/* Badges & Rank */}
                           <div className="flex items-center justify-between">
-                            <div className="flex gap-1.5 flex-wrap">
+                            <div className="flex gap-1.5 flex-wrap items-center">
                               <span
                                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                   opt.badge.includes('最快')
@@ -678,6 +701,9 @@ export function HandoffPage() {
                                 }`}
                               >
                                 {opt.badge}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                                DEMO DATA
                               </span>
                             </div>
                             <span className="text-[11px] font-semibold text-gray-400">
@@ -736,13 +762,15 @@ export function HandoffPage() {
                         {recommendations.disclaimer}
                       </div>
                       <p className="text-[10px] text-gray-600 leading-relaxed">
-                        🔒 <strong>隱私保護聲明</strong>：電商層僅使用最少必要之商品規格與時效資訊，絕不向外部商家傳遞幼兒姓名、照護日誌、健檢紀錄或家長身份。CareLink 本身不代收付款或建立商城訂單。
+                        🔒 <strong>隱私保護與規格說明</strong>：電商層僅使用最少必要之商品規格與時效資訊（品類、尺寸、數量、需求時效），絕不向外部商家傳遞幼兒姓名、照護日誌、健檢紀錄或家長身分。展示目錄均為 DEMO DATA，價格、配送時間與庫存非即時商業連線，資料更新時間：2026-10-08。實際價格與優惠以商家頁面為準。
                       </p>
                     </div>
                   </>
                 ) : (
                   <div className="py-8 text-center text-xs text-gray-500">
-                    暫無相符的商品推薦選項
+                    {selectedTaskForRec.item_name === '奶粉'
+                      ? '依安全規範，奶粉不提供商品推薦選項'
+                      : '暫無相符的商品推薦選項'}
                   </div>
                 )}
               </div>

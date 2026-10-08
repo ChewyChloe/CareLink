@@ -23,7 +23,8 @@ describe('Commerce Recommendation & Privacy Specification', () => {
       expect(topOption.type).toBe('FASTEST');
       expect(topOption.badge).toContain('最快到貨');
       expect(topOption.reason).toContain('最快到貨');
-      expect(res.disclaimer).toBe('價格與優惠以商家頁面當下資訊為準');
+      expect(res.disclaimer).toContain('【DEMO DATA 示範資料】');
+      expect(res.disclaimer).toContain('實際價格與優惠以商家頁面為準');
     });
 
     it('should prioritize CHEAPEST_UNIT_PRICE when due next week (> 3 days)', async () => {
@@ -59,7 +60,7 @@ describe('Commerce Recommendation & Privacy Specification', () => {
       expect(topOption.reason).toContain('偏好品牌');
     });
 
-    it('should return at least 3 ranked options when products are available', async () => {
+    it('should return at least 3 ranked options when products are available for low-risk items', async () => {
       const tomorrow = new Date(Date.now() + 24 * 3600 * 1000);
       const res = await provider.getRecommendations({
         itemCategory: '尿布',
@@ -70,7 +71,19 @@ describe('Commerce Recommendation & Privacy Specification', () => {
       expect(res.options.length).toBeGreaterThanOrEqual(3);
     });
 
-    it('should never contain placeholder prices or missing merchants', async () => {
+    it('Safety Rule: formula (奶粉) commerce recommendation MUST be suspended in MVP', async () => {
+      const res = await provider.getRecommendations({
+        itemCategory: '奶粉',
+      });
+
+      // Must return 0 options and clear guidance disclaimer
+      expect(res.options.length).toBe(0);
+      expect(res.disclaimer).toContain('奶粉');
+      expect(res.disclaimer).toContain('暫停');
+      expect(res.disclaimer).toContain('醫療專業指引');
+    });
+
+    it('all static catalog items must be marked as DEMO DATA with valid attributes', async () => {
       const res = await provider.getRecommendations({
         itemCategory: '濕紙巾',
       });
@@ -79,12 +92,13 @@ describe('Commerce Recommendation & Privacy Specification', () => {
         expect(opt.product.price).toBeGreaterThan(0);
         expect(opt.product.merchant).toBeTruthy();
         expect(opt.product.url).toMatch(/^https?:\/\//);
+        expect(opt.product.isDemoData).toBe(true);
       }
     });
   });
 
   describe('2. Data Minimization & Privacy Protection Enforcement', () => {
-    it('should strictly throw error when sensitive child health data or PII is passed to commerce layer', () => {
+    it('should strictly reject payloads with non-allowlisted keys or full database entities', () => {
       const payloadsWithForbiddenKeys = [
         { itemCategory: '尿布', child_name: '小米' },
         { itemCategory: '尿布', childId: 'child-secret-uuid' },
@@ -92,39 +106,53 @@ describe('Commerce Recommendation & Privacy Specification', () => {
         { itemCategory: '尿布', health_notes: '腹瀉發燒' },
         { itemCategory: '尿布', feeding_records: '11:40 喝奶 150ml' },
         { itemCategory: '尿布', notes: '老師說今天狀況不好' },
+        // Passing entire SupplyTask entity must be strictly rejected
+        {
+          id: 'task-123',
+          relationship_id: 'rel-456',
+          created_by: 'user-789',
+          assigned_to: 'guardian-101',
+          item_name: '尿布',
+          status: 'PENDING',
+        },
       ];
 
       for (const payload of payloadsWithForbiddenKeys) {
         expect(() => {
-          CommerceDataMinimizer.minimize(payload);
-        }).toThrow(/Data minimization violation/);
+          CommerceDataMinimizer.assertAllowlistOnly(payload);
+        }).toThrow(/Commerce privacy invariant violation/);
       }
     });
 
-    it('should cleanly minimize allowed operational parameters without leaking non-commerce fields', () => {
-      const cleanOperationalContext = {
+    it('should construct recommendation request via pure allowlist without taking entire database entities', () => {
+      const allowlistParams = {
         itemCategory: '尿布',
         size: 'M',
         quantity: '1包',
-        due_at: '2026-10-10T10:00:00.000Z',
+        dueAt: new Date('2026-10-10T10:00:00.000Z'),
         preferredBrand: '滿意寶寶',
-        extraIrrelevantClientField: 'some-random-flag',
       };
 
-      const minimized = CommerceDataMinimizer.minimize(cleanOperationalContext);
+      const request = CommerceDataMinimizer.createFromAllowlist(allowlistParams);
 
-      // Verify minimized payload contains allowed fields
-      expect(minimized.itemCategory).toBe('尿布');
-      expect(minimized.size).toBe('M');
-      expect(minimized.quantity).toBe('1包');
-      expect(minimized.preferredBrand).toBe('滿意寶寶');
-      expect(minimized.dueDate).toBeInstanceOf(Date);
+      expect(request.itemCategory).toBe('尿布');
+      expect(request.size).toBe('M');
+      expect(request.quantity).toBe('1包');
+      expect(request.dueAt).toEqual(new Date('2026-10-10T10:00:00.000Z'));
+      expect(request.preferredBrand).toBe('滿意寶寶');
 
-      // Verify extra fields dropped
-      const keys = Object.keys(minimized);
-      expect(keys).not.toContain('extraIrrelevantClientField');
-      expect(keys).not.toContain('child_name');
-      expect(keys).not.toContain('temperature');
+      // Ensure object keys strictly match allowlist
+      const allowedKeyNames = new Set([
+        'itemCategory',
+        'size',
+        'quantity',
+        'dueAt',
+        'dueDate',
+        'preferredBrand',
+      ]);
+      for (const k of Object.keys(request)) {
+        expect(allowedKeyNames.has(k)).toBe(true);
+      }
     });
   });
 });

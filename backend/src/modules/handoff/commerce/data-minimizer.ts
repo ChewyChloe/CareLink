@@ -1,89 +1,105 @@
 import { CommerceRecommendationRequest } from './commerce-product.interface';
 
 /**
- * Strict data minimization boundary for the commerce layer.
- * Enforces that only operational necessity attributes (category, size, quantity, dueDate, preferredBrand)
- * are passed to commerce providers.
+ * Strict allowlist construction boundary for the commerce layer.
  *
- * Explicitly strips and forbids PII, child names, health data, temperature, feeding records, notes, and user IDs.
+ * Rules:
+ * 1. Commerce layer MUST ONLY receive:
+ *    - itemCategory
+ *    - size
+ *    - quantity
+ *    - dueAt
+ *    - preferredBrand
+ * 2. It is STRICTLY FORBIDDEN to pass a full database entity (e.g. SupplyTask)
+ *    and filter it after the fact.
+ * 3. The request must be constructed via explicit allowlist instantiation.
  */
 export class CommerceDataMinimizer {
-  private static readonly FORBIDDEN_KEYS = [
-    'child_name',
-    'childName',
-    'child_id',
-    'childId',
-    'guardian_id',
-    'guardianId',
-    'user_id',
-    'userId',
-    'line_sub',
-    'temperature',
-    'feeding',
-    'sleep',
-    'health',
-    'medical',
-    'notes',
-    'caregiver_notes',
-  ];
+  public static readonly ALLOWLIST_KEYS = new Set([
+    'itemCategory',
+    'size',
+    'quantity',
+    'dueAt',
+    'dueDate', // alias
+    'preferredBrand',
+  ]);
 
   /**
-   * Sanitizes an arbitrary input payload into a minimal CommerceRecommendationRequest.
-   * Throws an error or strips forbidden keys if present.
+   * Pure allowlist constructor.
+   * Directly maps and returns only the 5 permitted attributes.
    */
-  public static minimize(rawInput: Record<string, any>): CommerceRecommendationRequest {
-    if (!rawInput || typeof rawInput !== 'object') {
-      throw new Error('Invalid input payload for commerce recommendation');
-    }
-
-    // Check for explicit leaks of forbidden keys
-    for (const key of Object.keys(rawInput)) {
-      const lower = key.toLowerCase();
-      for (const forbidden of CommerceDataMinimizer.FORBIDDEN_KEYS) {
-        if (lower.includes(forbidden.toLowerCase())) {
-          throw new Error(
-            `Data minimization violation: forbidden key "${key}" detected in commerce payload. Commerce layer must not receive child or guardian personal/health data.`,
-          );
-        }
-      }
-    }
-
-    const itemCategory = typeof rawInput.itemCategory === 'string'
-      ? rawInput.itemCategory.trim()
-      : typeof rawInput.item_name === 'string'
-      ? rawInput.item_name.trim()
+  public static createFromAllowlist(params: {
+    itemCategory: string;
+    size?: string | null;
+    quantity?: string | null;
+    dueAt?: Date | string | null;
+    preferredBrand?: string | null;
+  }): CommerceRecommendationRequest {
+    const itemCategory = typeof params.itemCategory === 'string' && params.itemCategory.trim()
+      ? params.itemCategory.trim()
       : '其他';
 
-    const size = typeof rawInput.size === 'string' && rawInput.size.trim()
-      ? rawInput.size.trim().toUpperCase()
+    const size = typeof params.size === 'string' && params.size.trim()
+      ? params.size.trim().toUpperCase()
       : null;
 
-    const quantity = typeof rawInput.quantity === 'string' && rawInput.quantity.trim()
-      ? rawInput.quantity.trim()
+    const quantity = typeof params.quantity === 'string' && params.quantity.trim()
+      ? params.quantity.trim()
       : null;
 
-    let dueDate: Date | null = null;
-    const rawDue = rawInput.dueDate || rawInput.due_at;
-    if (rawDue) {
-      const parsed = new Date(rawDue);
-      if (!isNaN(parsed.getTime())) {
-        dueDate = parsed;
+    let dueAt: Date | null = null;
+    if (params.dueAt) {
+      const d = params.dueAt instanceof Date ? params.dueAt : new Date(params.dueAt);
+      if (!isNaN(d.getTime())) {
+        dueAt = d;
       }
     }
 
-    const preferredBrand = typeof rawInput.preferredBrand === 'string' && rawInput.preferredBrand.trim()
-      ? rawInput.preferredBrand.trim()
-      : typeof rawInput.preferred_brand === 'string' && rawInput.preferred_brand.trim()
-      ? rawInput.preferred_brand.trim()
+    const preferredBrand = typeof params.preferredBrand === 'string' && params.preferredBrand.trim()
+      ? params.preferredBrand.trim()
       : null;
 
-    // Return strictly typed minimal object with ONLY allowed fields
-    return {
+    return Object.freeze({
       itemCategory,
       size,
       quantity,
-      dueDate,
+      dueAt,
+      dueDate: dueAt,
       preferredBrand,
-    };
+    });
+  }
+
+  /**
+   * Rejects any payload that contains non-allowlist keys (e.g. passing an entire SupplyTask or PII).
+   */
+  public static assertAllowlistOnly(rawInput: Record<string, any>): void {
+    if (!rawInput || typeof rawInput !== 'object') {
+      throw new Error('Commerce privacy violation: request payload must be an object.');
+    }
+
+    const keys = Object.keys(rawInput);
+    for (const key of keys) {
+      if (!CommerceDataMinimizer.ALLOWLIST_KEYS.has(key)) {
+        throw new Error(
+          `Commerce privacy invariant violation: key "${key}" is not permitted. Passing entire database entities (e.g., SupplyTask) or non-allowlisted properties to commerce layer is strictly prohibited. Commerce layer can only receive: itemCategory, size, quantity, dueAt, preferredBrand.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Validates allowlist conformity and returns a safe CommerceRecommendationRequest.
+   */
+  public static minimize(rawInput: Record<string, any>): CommerceRecommendationRequest {
+    // Assert strictly that no unexpected keys were provided
+    CommerceDataMinimizer.assertAllowlistOnly(rawInput);
+
+    return CommerceDataMinimizer.createFromAllowlist({
+      itemCategory: rawInput.itemCategory,
+      size: rawInput.size,
+      quantity: rawInput.quantity,
+      dueAt: rawInput.dueAt || rawInput.dueDate,
+      preferredBrand: rawInput.preferredBrand,
+    });
   }
 }

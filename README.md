@@ -137,10 +137,63 @@ For LINE webhook testing, you'll need a tunnel (localtunnel or ngrok) pointing t
 
 ### Running tests
 
+CareLink maintains a strict separation between offline regression suites and live external benchmarks:
+
+#### 1. Offline / Regression Test Results
+Runs deterministic test vectors against schema constraints, state machine transitions, and mock domain providers without external network dependencies:
+
 ```bash
 cd backend
-npm test
+npm test -- --testPathIgnorePatterns=live-gemini-eval
 ```
+
+Coverage includes:
+- **AI Extraction Contract (37 test cases)**: Multilingual sentences, temporal statuses (`ACTUAL`, `PLANNED`, `NEGATED`, `UNCERTAIN`), prompt injection resistance.
+- **Supply Workflow & Safety Invariants (12 test cases)**: Server-side validation rejecting confirmation of `UNCERTAIN`, `NEGATED`, missing fields, or missing `due_at`.
+- **Commerce Privacy Boundary (8 test cases)**: Strict allowlist construction (`itemCategory`, `size`, `quantity`, `dueAt`, `preferredBrand`), forbidding full entity pass-through.
+- **Handoff & Job Scheduling (18 test cases)**: Lifecycle from `PENDING` → `PACKED` → `RECEIVED`, idempotency, and retry keys.
+
+#### 2. Live Gemini Benchmark Results
+Live end-to-end evaluation against Google Gemini (`gemini-3.6-flash`) via `@google/genai`:
+
+```bash
+cd backend
+npm test -- src/modules/ai/live-gemini-eval.spec.ts
+```
+
+*Transparency Notice*: Live network calls require an active `GEMINI_API_KEY`. When using Google Cloud Free Tier quotas (20 requests/day), live benchmarks are subject to daily rate limits. In accordance with competition guidelines, CareLink does not claim live AI benchmark accuracy percentages unless a complete, unthrottled live benchmark run is performed with a dedicated quota key.
+
+## Care-to-Commerce Architecture & Privacy Invariants
+
+CareLink closes the loop between caregiving supply shortages and parent procurement while preserving strict data minimization:
+
+1. **Human Confirmation Gate**: AI extracts supply drafts (`SupplyDraft`). A production `SupplyTask` is created only when a caregiver explicitly confirms all required fields. Drafts marked `UNCERTAIN`, `NEGATED`, or missing critical dates cannot be confirmed.
+2. **Allowlist Privacy Construction**: The commerce layer only receives five strictly allowlisted attributes:
+   - `itemCategory`
+   - `size`
+   - `quantity`
+   - `dueAt`
+   - `preferredBrand`
+   Full database entities (e.g. `SupplyTask`, `Child`, `User`), health records, and daily notes are never passed to the commerce layer.
+3. **Demo Data Disclosure**: All catalog products in the MVP are static demonstration data (`isDemoData: true`, catalog version: 2026-10-08). Real-time pricing, stock, and delivery times are not claimed; actual prices and promotions are subject to merchant partner checkout pages.
+4. **Partner Integration Architecture**: Designed for integration with "authorized partner product feed / commerce API when available". No unverified commercial APIs are claimed.
+5. **Infant Formula Safety Policy**: In compliance with infant care safety guidelines, commercial price comparisons and brand rankings for infant formula (奶粉) are suspended in the MVP. Parents can still set supply handoff reminders for formula, but are advised to consult pediatric healthcare recommendations for formula choices. Recommendation algorithms are restricted to low-risk consumables (diapers, wet wipes, clothing).
+
+## Database Migrations
+
+CareLink manages schema evolutions through versioned Prisma migrations:
+
+```bash
+cd backend
+npx prisma migrate deploy
+```
+
+Current migrations:
+- `20260303100000_init_core`
+- `20260303110000_contracts_and_rates`
+- `20260303120000_attendance_evidence`
+- `20260303130000_supply_tasks`
+- `20261008000000_care_to_commerce_supply_draft` (SupplyDraft gate, allowlist schema, and audit indices)
 
 ## Project structure
 

@@ -1,6 +1,7 @@
 import { Injectable, Logger, ForbiddenException, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StaticCommerceProvider } from './commerce/static-commerce.provider';
+import { CommerceDataMinimizer } from './commerce/data-minimizer';
 
 export interface CreateReminderInput {
   item_name: string;
@@ -20,6 +21,7 @@ export interface CreateSupplyDraftInput {
   due_at?: string;
   urgency?: string;
   temporal_status?: string;
+  missing_fields?: string[];
   guardian_user_id?: string;
 }
 
@@ -200,6 +202,10 @@ export class SupplyReminderService {
     });
 
     const dueAt = input.due_at ? new Date(input.due_at) : null;
+    const missingFields = [...(input.missing_fields || [])];
+    if (!dueAt && !missingFields.includes('due_at')) {
+      missingFields.push('due_at');
+    }
 
     if (!this.prisma.supplyDraft?.create) {
       return {
@@ -209,6 +215,9 @@ export class SupplyReminderService {
         quantity: input.quantity || null,
         remaining_quantity: input.remaining_quantity || null,
         status: 'PENDING_CONFIRMATION',
+        missing_fields: missingFields,
+        temporal_status: input.temporal_status || 'ACTUAL',
+        due_at: dueAt,
       };
     }
 
@@ -226,6 +235,7 @@ export class SupplyReminderService {
         due_at: dueAt,
         urgency: input.urgency || 'NORMAL',
         temporal_status: input.temporal_status || 'ACTUAL',
+        missing_fields: missingFields,
         status: 'PENDING_CONFIRMATION',
         lock_version: 1,
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -235,6 +245,11 @@ export class SupplyReminderService {
 
   /**
    * Confirms a SupplyDraft and transitions it into a production SupplyTask.
+   * Enforces server-side safety invariants:
+   * - UNCERTAIN cannot be confirmed
+   * - NEGATED cannot be confirmed
+   * - missing_fields non-empty cannot be confirmed
+   * - due_at missing cannot create SupplyTask
    */
   async confirmDraft(
     userId: string,
@@ -257,17 +272,43 @@ export class SupplyReminderService {
       throw new BadRequestException(`Supply draft is not pending confirmation: ${draft.status}`);
     }
 
+    // Safety Invariant 1: UNCERTAIN cannot be confirmed
+    if (draft.temporal_status === 'UNCERTAIN') {
+      throw new BadRequestException(
+        'Cannot confirm an uncertain supply draft into a SupplyTask. Uncertainty must be resolved first.',
+      );
+    }
+
+    // Safety Invariant 2: NEGATED cannot be confirmed
     if (draft.temporal_status === 'NEGATED') {
       throw new BadRequestException('Cannot confirm a negated supply draft into a SupplyTask');
+    }
+
+    // Safety Invariant 3: missing_fields non-empty cannot be confirmed (unless resolved via override)
+    const effectiveMissing = (draft.missing_fields || []).filter((field: string) => {
+      if (field === 'due_at' && (override?.due_at || draft.due_at)) return false;
+      if (field === 'quantity' && (override?.quantity || draft.quantity)) return false;
+      if (field === 'size' && (override?.size || draft.size)) return false;
+      return true;
+    });
+
+    if (effectiveMissing.length > 0) {
+      throw new BadRequestException(
+        `Cannot confirm supply draft with missing fields: ${effectiveMissing.join(', ')}. Please provide all required details before confirmation.`,
+      );
     }
 
     if (!draft.child_id) {
       throw new BadRequestException('Draft has no child associated');
     }
 
+    // Safety Invariant 4: due_at missing cannot create SupplyTask
     const dueAtStr =
       override?.due_at ||
-      (draft.due_at ? draft.due_at.toISOString() : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+      (draft.due_at ? (draft.due_at instanceof Date ? draft.due_at.toISOString() : String(draft.due_at)) : null);
+    if (!dueAtStr) {
+      throw new BadRequestException('Cannot confirm supply draft: due_at is required to create a SupplyTask.');
+    }
 
     // 1. Create production SupplyTask
     const task = await this.createReminder(userId, draft.child_id, {
@@ -376,13 +417,16 @@ export class SupplyReminderService {
       throw new ForbiddenException('No access to this child');
     }
 
-    return this.commerceProvider.getRecommendations({
+    // Pure allowlist construction: ONLY 5 whitelisted attributes are sent to commerce layer
+    const commerceRequest = CommerceDataMinimizer.createFromAllowlist({
       itemCategory: task.item_name,
       size: task.size,
       quantity: task.quantity,
-      dueDate: task.due_at,
+      dueAt: task.due_at,
       preferredBrand,
     });
+
+    return this.commerceProvider.getRecommendations(commerceRequest);
   }
 
   /**

@@ -201,6 +201,96 @@ describe('Supply Workflow & State Transition Specification', () => {
         BadRequestException,
       );
     });
+
+    it('Safety Invariant: UNCERTAIN draft CANNOT be confirmed', async () => {
+      const draft = await service.createDraft('caregiver-1', 'child-1', {
+        item_name: '尿布',
+        size: 'L',
+        quantity: '1包',
+        due_at: new Date(Date.now() + 86400000).toISOString(),
+        temporal_status: 'UNCERTAIN',
+      });
+
+      await expect(service.confirmDraft('caregiver-1', draft.id)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.confirmDraft('caregiver-1', draft.id)).rejects.toThrow(
+        /Cannot confirm an uncertain supply draft/i,
+      );
+      // Ensure no SupplyTask was created
+      expect(prisma._store.tasks.size).toBe(0);
+    });
+
+    it('Safety Invariant: NEGATED draft CANNOT be confirmed', async () => {
+      const draft = await service.createDraft('caregiver-1', 'child-1', {
+        item_name: '尿布',
+        size: 'L',
+        quantity: '1包',
+        due_at: new Date(Date.now() + 86400000).toISOString(),
+        temporal_status: 'NEGATED',
+      });
+
+      await expect(service.confirmDraft('caregiver-1', draft.id)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.confirmDraft('caregiver-1', draft.id)).rejects.toThrow(
+        /Cannot confirm a negated supply draft/i,
+      );
+      expect(prisma._store.tasks.size).toBe(0);
+    });
+
+    it('Safety Invariant: missing_fields non-empty CANNOT be confirmed unless resolved by override', async () => {
+      const draft = await service.createDraft('caregiver-1', 'child-1', {
+        item_name: '尿布',
+        missing_fields: ['size', 'quantity'],
+        due_at: new Date(Date.now() + 86400000).toISOString(),
+      });
+
+      // Confirming without override should fail
+      await expect(service.confirmDraft('caregiver-1', draft.id)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.confirmDraft('caregiver-1', draft.id)).rejects.toThrow(
+        /Cannot confirm supply draft with missing fields/i,
+      );
+      expect(prisma._store.tasks.size).toBe(0);
+
+      // Confirming with partial override still fails if some missing fields remain
+      await expect(
+        service.confirmDraft('caregiver-1', draft.id, { size: 'XL' }),
+      ).rejects.toThrow(BadRequestException);
+
+      // Confirming with full overrides resolving missing fields should succeed
+      const { task } = await service.confirmDraft('caregiver-1', draft.id, {
+        size: 'XL',
+        quantity: '2包',
+      });
+      expect(task).toBeDefined();
+      expect(task.size).toBe('XL');
+      expect(task.quantity).toBe('2包');
+    });
+
+    it('Safety Invariant: missing due_at CANNOT create SupplyTask', async () => {
+      const draft = await service.createDraft('caregiver-1', 'child-1', {
+        item_name: '濕紙巾',
+        quantity: '2包',
+        // due_at omitted
+      });
+
+      // Attempting to confirm draft without due_at must be rejected
+      await expect(service.confirmDraft('caregiver-1', draft.id)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prisma._store.tasks.size).toBe(0);
+
+      // Once due_at is provided via override, confirmation succeeds
+      const validDueAt = new Date(Date.now() + 86400000).toISOString();
+      const { task } = await service.confirmDraft('caregiver-1', draft.id, {
+        due_at: validDueAt,
+      });
+      expect(task).toBeDefined();
+      expect(task.status).toBe('PENDING');
+    });
   });
 
   describe('2. State Machine Transitions: PENDING -> PACKED -> RECEIVED', () => {
