@@ -116,6 +116,7 @@ export type ExtractedSupplyNeed = z.infer<typeof ExtractedSupplyNeedSchema>;
  * Supports both care_events (aliased as events for backward compatibility) and supply_needs.
  */
 export const CareExtractionOutputSchema = z.object({
+  unsupported: z.array(z.object({ reason: z.literal('requires_manual_entry'), event_type: z.string() })).optional(),
   schema_version: z.string().default('v1'),
   events: z.array(ExtractedCareEventSchema).default([]),
   supply_needs: z.array(ExtractedSupplyNeedSchema).default([]),
@@ -132,6 +133,7 @@ export const GeminiCareExtractionJsonSchema = {
   properties: {
     schema_version: { type: 'STRING', description: 'Schema version e.g. v1' },
     requires_user_input: { type: 'BOOLEAN', description: 'Set true if facts are missing or uncertain' },
+    unsupported: { type: 'ARRAY', items: { type: 'OBJECT', properties: { reason: { type: 'STRING', enum: ['requires_manual_entry'] }, event_type: { type: 'STRING' } }, required: ['reason', 'event_type'] } },
     events: {
       type: 'ARRAY',
       items: {
@@ -178,7 +180,7 @@ export const GeminiCareExtractionJsonSchema = {
             description: 'Token reference like CHILD_A or CHILD_B',
           },
         },
-        required: ['event_type', 'temporal_status', 'source_span', 'missing_fields'],
+        required: ['event_type', 'temporal_status', 'source_span', 'missing_fields', 'occurred_at', 'payload', 'child_ref'],
       },
     },
     supply_needs: {

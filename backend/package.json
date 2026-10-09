@@ -13,7 +13,10 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "test": "jest"
+    "test": "node scripts/test-isolated.cjs test",
+    "test:full": "node scripts/test-isolated.cjs test",
+    "test:db:migrate": "node scripts/test-isolated.cjs migrate",
+    "test:db:status": "node scripts/test-isolated.cjs status"
   },
   "dependencies": {
     "@google/genai": "^2.22.0",

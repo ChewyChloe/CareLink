@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import * as cookieParserModule from 'cookie-parser';
+import { HTTP_PREFIX_OPTIONS } from './http-prefix';
 import { AppModule } from './app.module';
 
 const cookieParser = (cookieParserModule as any).default || cookieParserModule;
@@ -15,12 +16,11 @@ async function bootstrap() {
   (app.getHttpAdapter().getInstance() as any)?.set?.('trust proxy', 1);
 
   const rawFrontend = process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:5173';
+  if (process.env.NODE_ENV === 'production' && (!process.env.FRONTEND_ORIGIN || /localhost|127\.0\.0\.1|trycloudflare/i.test(rawFrontend) || !rawFrontend.split(',').every(o => o.trim().startsWith('https://')))) throw new Error('Production requires explicit permanent HTTPS FRONTEND_ORIGIN');
   const splitOrigins = rawFrontend.split(',').map((s) => s.trim().replace(/\/$/, ''));
   const staticOrigins = new Set([
     ...splitOrigins,
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
+    ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:5173']),
   ]);
 
   app.enableCors({
@@ -41,9 +41,7 @@ async function bootstrap() {
     }),
   );
 
-  app.setGlobalPrefix('api', {
-    exclude: ['health', 'api/health', 'webhooks/(.*)'],
-  });
+  app.setGlobalPrefix('api', HTTP_PREFIX_OPTIONS);
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

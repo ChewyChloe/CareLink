@@ -658,6 +658,14 @@ describe('Manual Entry & Deterministic Care Events (Phases 1–25)', () => {
       expect(event.guardian_instruction_id).toBe(instruction.id);
       expect(event.provenance_text).toContain('咳嗽藥水 5ml');
     });
+    it('a parent comment cannot serve as medication authorization', async () => {
+      const note = await service.createGuardianInstruction(mockChildIdA, mockGuardianId, { instruction_type: 'COMMENT', content: '合成一般留言' });
+      await expect(service.createManualEvent(mockChildIdA, mockCaregiverId, {
+        event_type: 'MEDICATION', occurred_at: '2026-09-17T14:00:00+08:00',
+        payload: { medication_name: '合成測試藥名', dosage_text: '5ml', administered_at: '14:00' },
+        guardian_instruction_id: note.id,
+      })).rejects.toThrow('not medication authorization');
+    });
   });
 
   describe('8. Guardian Read Receipt Authorization', () => {

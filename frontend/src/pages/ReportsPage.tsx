@@ -1,3 +1,4 @@
+import { useAuth } from '../auth/AuthContext';
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -36,6 +37,7 @@ interface ChildItem {
 }
 
 export const ReportsPage: React.FC = () => {
+  const [childrenPending, setChildrenPending] = useState(true);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -52,7 +54,8 @@ export const ReportsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const isPreview = typeof window !== 'undefined' && (
+  const { user } = useAuth();
+  const isPreview = !user && typeof window !== 'undefined' && (
     searchParams.get('preview') === 'true' ||
     searchParams.get('demo') === 'true'
   );
@@ -99,6 +102,7 @@ export const ReportsPage: React.FC = () => {
   // Initialize child list
   useEffect(() => {
     if (isPreview) {
+      setChildrenPending(false);
       setChildren([
         { id: 'demo_ty', nickname: '湯圓', ageText: '1歲3個月' },
         { id: 'demo_xc', nickname: '張忱恩', ageText: '1歲3個月' },
@@ -112,6 +116,7 @@ export const ReportsPage: React.FC = () => {
     const fetchChildren = async () => {
       try {
         const res = await fetch('/api/children/overview', { credentials: 'include' });
+        if (!res.ok) throw new Error(res.status === 401 ? '請重新登入' : '幼兒資料載入失敗');
         if (res.ok) {
           const data = await res.json();
           const items: ChildItem[] = (data.children || []).map((c: any) => ({
@@ -130,8 +135,8 @@ export const ReportsPage: React.FC = () => {
           }
         }
       } catch (err) {
-        console.error('Failed to load children overview:', err);
-      }
+        setError((err as Error).message); setLoading(false);
+      } finally { setChildrenPending(false); }
     };
     fetchChildren();
   }, [searchParams, isPreview]);
@@ -143,18 +148,18 @@ export const ReportsPage: React.FC = () => {
       setLoading(false);
       return;
     }
-    if (!selectedChildId) return;
+    if (!selectedChildId) { setLoading(false); return; }
 
     const fetchReport = async () => {
       try {
         setLoading(true);
-        setError(null);
+        setError(null); setReport(null);
         const res = await fetch(
           `/api/children/${selectedChildId}/reports?month=${currentMonth}`,
           { credentials: 'include' }
         );
         if (!res.ok) {
-          throw new Error(`無法取得報表資料 (${res.status})`);
+          throw new Error(res.status === 401 ? '請重新登入' : `無法取得報表資料 (${res.status})`);
         }
         const data: GrowthReportData = await res.json();
         setReport(data);
@@ -193,6 +198,9 @@ export const ReportsPage: React.FC = () => {
   // Max milk in trend for scaling
   const maxMilk = Math.max(800, ...(report?.milk_trend?.map(t => t.total_ml) || [600]));
 
+  if (loading || childrenPending) return <main role="status" className="p-8 pt-24">載入中…</main>;
+  if (error) return <main role="alert" className="p-8 pt-24">{error}</main>;
+  if (!isPreview && !selectedChildId) return <main className="p-8 pt-24">尚無可查看的孩子。</main>;
   return (
     <div className="min-h-screen bg-[#fbf9f5] font-['Plus_Jakarta_Sans',sans-serif] text-[#1b1c1a] antialiased pb-24">
       {/* Top Fixed Header */}

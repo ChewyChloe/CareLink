@@ -19,6 +19,7 @@ export function Navigation() {
             </div>
           </NavLink>
 
+          <NavLink to="/invitations">照護邀請</NavLink>
           {/* Desktop Navigation Links */}
           <div className="hidden md:flex items-center gap-1.5">
             <NavLink

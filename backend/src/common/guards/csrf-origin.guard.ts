@@ -22,9 +22,7 @@ export class CsrfOriginGuard implements CanActivate {
     this.allowedOrigins = Array.from(
       new Set([
         ...splitOrigins,
-        'http://localhost:3000',
-        'http://localhost:5173',
-        'http://127.0.0.1:5173',
+        ...(this.configService.get('NODE_ENV') === 'production' ? [] : ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:5173']),
       ]),
     );
   }

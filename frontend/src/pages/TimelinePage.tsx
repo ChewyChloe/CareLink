@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { confirmedSummary } from '../lib/confirmed-summary';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import {
@@ -51,12 +52,15 @@ export function TimelinePage() {
 
   const [children, setChildren] = useState<Child[]>([]);
   const [childId, setChildId] = useState('');
+  const activeChild = useRef(childId); activeChild.current = childId;
   const [date, setDate] = useState(() =>
     dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayKey,
   );
   const [items, setItems] = useState<CareRecord[]>([]);
   const [summary, setSummary] = useState<DailySummaryMetrics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [summaryPending, setSummaryPending] = useState(false);
+  const [childrenPending, setChildrenPending] = useState(true);
   const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0);
 
@@ -80,7 +84,13 @@ export function TimelinePage() {
 
   // Parent comment state
   const [commentText, setCommentText] = useState('');
-  const [commentFeedback, setCommentFeedback] = useState(false);
+  const [commentType, setCommentType] = useState('COMMENT');
+  const [commentFeedback, setCommentFeedback] = useState('');
+  const [commentError, setCommentError] = useState('');
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notes, setNotes] = useState<Array<{ id: string; child_id: string; author_user_id: string; instruction_type: string; content: string; created_at: string; revoked_at?: string | null }>>([]);
+
 
   const isPreview =
     !user &&
@@ -148,9 +158,37 @@ export function TimelinePage() {
     },
   ];
 
+  const displaySummary = isPreview ? confirmedSummary(previewItems, date) : summary;
   const child = children.find((c) => c.id === childId) || (isPreview ? previewChild : undefined);
   const displayItems = items.length > 0 ? items : isPreview ? previewItems : items;
   const isToday = date === todayKey;
+  const canComment = !isPreview && ['GUARDIAN', 'PARENT'].includes(child?.role || '');
+
+  useEffect(() => {
+    setNotes([]); setCommentFeedback(''); setCommentError(''); setCommentText('');
+    if (!childId || isPreview) { setNotesLoading(false); return; }
+    const controller = new AbortController(); setNotesLoading(true);
+    fetch(`/api/children/${childId}/instructions`, { credentials: 'include', signal: controller.signal })
+      .then(async res => { if (!res.ok) throw new Error(res.status === 401 ? '請重新登入' : '留言載入失敗'); return res.json(); })
+      .then(data => { if (!controller.signal.aborted) setNotes(data.filter((note: { revoked_at?: string | null }) => !note.revoked_at)); })
+      .catch(err => { if (err.name !== 'AbortError') setCommentError(err.message); })
+      .finally(() => { if (!controller.signal.aborted) setNotesLoading(false); });
+    return () => controller.abort();
+  }, [childId, isPreview]);
+
+  async function handleSendComment() {
+    if (!canComment || !commentText.trim() || commentSaving) return;
+    setCommentSaving(true); setCommentError(''); setCommentFeedback('');
+    try {
+      const res = await fetch(`/api/children/${childId}/instructions`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instruction_type: commentType, content: commentText.trim() }) });
+      if (!res.ok) throw new Error(res.status === 401 ? '請重新登入；原文已保留' : '留言保存失敗；原文已保留');
+      const saved = await res.json();
+      if (activeChild.current !== childId) return;
+      if (!saved.id || saved.child_id !== childId || !saved.created_at || saved.author_user_id !== user?.id) throw new Error('無法核對保存結果；原文已保留');
+      setNotes(old => [saved, ...old.filter(note => note.id !== saved.id)]);
+      setCommentText(''); setCommentFeedback('已保存留言；具備孩子權限的照護者可在此頁讀取。');
+    } catch (err) { if (activeChild.current === childId) setCommentError((err as Error).message); } finally { setCommentSaving(false); }
+  }
 
   const handlePrevDay = () => {
     const prev = shiftDateKey(date, -1);
@@ -177,17 +215,13 @@ export function TimelinePage() {
     navigate(`/calendar?${params.toString()}`);
   };
 
-  const handleSendComment = () => {
-    if (!commentText.trim()) return;
-    setCommentFeedback(true);
-    setCommentText('');
-    setTimeout(() => setCommentFeedback(false), 3500);
-  };
+
 
   // Initial load: User info & children
   useEffect(() => {
     if (isPreview) {
       setChildren([previewChild]);
+      setChildrenPending(false);
       setChildId('demo_ty');
       setLoading(false);
       return;
@@ -195,14 +229,14 @@ export function TimelinePage() {
     let cancelled = false;
     fetch('/api/me')
       .then((res) => {
-        if (!res.ok) throw new Error('無法取得使用者資料');
+        if (!res.ok) throw new Error(res.status === 401 ? '請重新登入' : '無法取得使用者資料');
         return res.json();
       })
       .then((data) => {
         if (cancelled) return;
-        const list: Child[] = (data.children || []).map((c: any) => ({
-          id: c.child_id,
-          displayAlias: c.child_display_alias || '未命名',
+        const list: Child[] = (data.grants || []).map((c: any) => ({
+          id: c.childId,
+          displayAlias: c.childAlias || '未命名',
           role: c.role,
           scopes: c.scopes || [],
         }));
@@ -215,7 +249,8 @@ export function TimelinePage() {
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);
-      });
+      })
+      .finally(() => { if (!cancelled) setChildrenPending(false); });
     return () => {
       cancelled = true;
     };
@@ -225,11 +260,15 @@ export function TimelinePage() {
   useEffect(() => {
     if (!childId || isPreview) {
       setLoading(false);
+      setSummaryPending(false);
       return;
     }
     let cancelled = false;
     setLoading(true);
+    setSummaryPending(true);
     setError('');
+    setItems([]);
+    setSummary(null);
 
     const params = new URLSearchParams();
     params.set('date', date);
@@ -238,7 +277,7 @@ export function TimelinePage() {
     // Fetch timeline
     fetch(`/api/children/${childId}/timeline?${params.toString()}`)
       .then((res) => {
-        if (!res.ok) throw new Error('載入時間軸失敗');
+        if (!res.ok) throw new Error(res.status === 401 ? '請重新登入' : '載入時間軸失敗');
         return res.json();
       })
       .then((data) => {
@@ -290,12 +329,12 @@ export function TimelinePage() {
 
     // Fetch daily summary
     fetch(`/api/children/${childId}/summary?date=${date}`)
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => { if (!res.ok) throw new Error(res.status === 401 ? '請重新登入' : '摘要載入失敗'); return res.json(); })
       .then((s) => {
         if (!cancelled && s) setSummary(s);
       })
-      .catch(console.error);
-
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setSummaryPending(false); });
     return () => {
       cancelled = true;
     };
@@ -355,6 +394,9 @@ export function TimelinePage() {
     }
   };
 
+  if (loading || summaryPending || childrenPending) return <main role="status" className="p-8 pt-24">載入中…</main>;
+  if (error) return <main role="alert" className="p-8 pt-24">{error}</main>;
+  if (!isPreview && !childId) return <main className="p-8 pt-24">尚無可查看的孩子。</main>;
   return (
     <div className="w-full min-h-screen bg-surface font-body-md text-body-md text-on-surface flex flex-col pb-28">
       {/* Top Header */}
@@ -456,25 +498,25 @@ export function TimelinePage() {
             <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-surface-container-low text-center">
               <span className="font-label-sm text-label-sm text-on-surface-variant">體溫</span>
               <span className="font-label-lg text-label-lg text-primary font-bold">
-                {summary?.latest_temperature ? `${summary.latest_temperature}°C` : '—'}
+                {displaySummary?.latest_temperature ? `${displaySummary.latest_temperature}°C` : '—'}
               </span>
             </div>
             <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-surface-container-low text-center">
               <span className="font-label-sm text-label-sm text-on-surface-variant">喝奶量</span>
               <span className="font-label-lg text-label-lg text-secondary font-bold">
-                {summary?.total_feed_amount_ml ? `${summary.total_feed_amount_ml}ml` : '0ml'}
+                {displaySummary?.total_feed_amount_ml ? `${displaySummary.total_feed_amount_ml}ml` : '0ml'}
               </span>
             </div>
             <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-surface-container-low text-center">
               <span className="font-label-sm text-label-sm text-on-surface-variant">換尿布</span>
               <span className="font-label-lg text-label-lg text-tertiary font-bold">
-                {summary?.diaper_count || 0} 次
+                {displaySummary?.diaper_count || 0} 次
               </span>
             </div>
             <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-surface-container-low text-center">
               <span className="font-label-sm text-label-sm text-on-surface-variant">午睡總長</span>
               <span className="font-label-lg text-label-lg text-on-surface font-bold">
-                {summary?.sleep_duration_text || '0m'}
+                {displaySummary?.sleep_duration_text || '0m'}
               </span>
             </div>
           </div>
@@ -644,38 +686,6 @@ export function TimelinePage() {
           </div>
         )}
 
-        {/* Teacher Professional Sign-off Block (Phase 16) */}
-        <div className="w-full bg-surface-container-lowest rounded-2xl p-space-md shadow-sm border border-surface-container/60 flex flex-col gap-space-sm mt-2">
-          <div className="flex items-center justify-between pb-1">
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-full bg-primary-container text-on-primary flex items-center justify-center font-bold text-headline-sm">
-                師
-              </div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <h4 className="font-label-lg text-label-lg text-on-surface font-semibold">
-                    托育簽核備忘
-                  </h4>
-                  <span className="material-symbols-outlined text-primary text-[16px]">verified</span>
-                </div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant">
-                  愛苗合格專業托育中心
-                </p>
-              </div>
-            </div>
-            <span className="px-2.5 py-1 rounded-full bg-surface-container-low text-outline font-label-sm text-label-sm">
-              每日如實登載
-            </span>
-          </div>
-
-          <div className="p-space-sm rounded-xl bg-surface-container-low flex items-start gap-2">
-            <span className="material-symbols-outlined text-primary text-[20px] shrink-0 mt-0.5">format_quote</span>
-            <p className="font-body-sm text-body-sm text-on-surface leading-snug">
-              寶寶今日身心狀況平穩，餐點按時完食，午睡作息規律。請家長安心！
-            </p>
-          </div>
-        </div>
-
         {/* Parent Feedback Block (Phase 16) */}
         <div className="w-full bg-surface-container-lowest rounded-2xl p-space-md shadow-sm border border-surface-container/60 flex flex-col gap-space-sm">
           <div className="flex items-center justify-between">
@@ -689,22 +699,27 @@ export function TimelinePage() {
           </div>
 
           <textarea
+            disabled={!canComment || commentSaving}
+            maxLength={2000}
             value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
+            onChange={(e) => { setCommentText(e.target.value); setCommentFeedback(''); }}
             rows={2}
             placeholder="感謝老師細心照顧！今晚預計 18:00 由爸爸接回..."
             className="w-full rounded-xl bg-surface-container-low p-3 font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none border border-surface-container/50"
           ></textarea>
+          {canComment && <label>留言類型 <select value={commentType} disabled={commentSaving} onChange={e => setCommentType(e.target.value)}><option value="COMMENT">一般留言</option><option value="PICKUP_NOTE">接送叮嚀</option></select></label>}
+          {notesLoading ? <p role="status">留言載入中…</p> : commentError ? <p role="alert">{commentError}</p> : !isPreview && !notes.length ? <p>尚無已保存留言。</p> : null}
+          {notes.map(note => <article key={note.id}><p>{note.instruction_type} · 作者 {note.author_user_id} · {new Date(note.created_at).toLocaleString('zh-TW')}</p><p>{note.content}</p></article>)}
 
           <div className="flex items-center justify-between pt-1">
             <span className="text-xs text-outline">
-              {commentFeedback ? '✓ 已送出留言給托育老師' : '送出後老師端將同步接收'}
+              {isPreview ? '合成預覽不提供留言保存。' : commentFeedback || '保存後才會清空文字；此處不表示 LINE 已送達或保母已閱讀。'}
             </span>
             <button
-              onClick={handleSendComment}
+              disabled={!canComment || commentSaving || !commentText.trim()} onClick={handleSendComment}
               className="px-5 py-2 rounded-full bg-primary hover:bg-primary/90 text-on-primary font-label-md text-label-md font-semibold shadow-sm active:scale-95 transition-all"
             >
-              送出留言
+              {isPreview ? '預覽不可保存' : commentSaving ? '保存中…' : '保存留言'}
             </button>
           </div>
         </div>

@@ -8,6 +8,7 @@ import {
   UseGuards,
   BadRequestException,
 } from '@nestjs/common';
+import { CsrfOriginGuard } from '../../common/guards/csrf-origin.guard';
 import { AuthGuard, AuthenticatedUser } from '../auth/guards/auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { TimelineService } from './timeline.service';
@@ -27,7 +28,7 @@ import {
 } from './guardian-instruction.dto';
 
 @Controller()
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, CsrfOriginGuard)
 export class TimelineController {
   constructor(private readonly timelineService: TimelineService) {}
 

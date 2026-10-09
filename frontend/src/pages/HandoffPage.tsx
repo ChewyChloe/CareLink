@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
 interface SupplyReminder {
@@ -135,7 +135,13 @@ export function HandoffPage() {
   const [dueAt, setDueAt] = useState('');
 
   // Determine child and role from grants
-  const grant = user?.grants?.[0];
+  const [params, setParams] = useSearchParams();
+  const requestedChild = params.get('child_id');
+  const grants = user?.grants || [];
+  const grant = requestedChild ? grants.find(g => g.childId === requestedChild) : grants[0];
+  const activeChild = useRef(grant?.childId); activeChild.current = grant?.childId;
+  const generation = useRef(0);
+  const [loadedChild, setLoadedChild] = useState('');
   const childId = grant?.childId;
   const childAlias = grant?.childAlias || '幼兒';
   const userRole = grant?.role;
@@ -143,31 +149,32 @@ export function HandoffPage() {
 
   // Load reminders and drafts
   const fetchRemindersAndDrafts = useCallback(async () => {
-    if (!childId) return;
-    setLoading(true);
+    if (!childId || activeChild.current !== childId) return;
+    const version = ++generation.current;
+    setLoading(true); setError(null); setLoadedChild(''); setReminders([]); setDrafts([]);
     try {
       const [remindersRes, draftsRes] = await Promise.all([
         fetch(`/api/supply-reminders?child_id=${childId}`, { credentials: 'include' }),
         fetch(`/api/supply-reminders/drafts?child_id=${childId}`, { credentials: 'include' }),
       ]);
 
-      if (remindersRes.ok) {
-        const data = await remindersRes.json();
-        setReminders(data);
-      }
-      if (draftsRes.ok) {
-        const draftsData = await draftsRes.json();
-        setDrafts(draftsData);
-      }
-    } catch {
-      // Silently fail
+      if (!remindersRes.ok || !draftsRes.ok) throw new Error(remindersRes.status === 401 || draftsRes.status === 401 ? '請重新登入' : '交接資料載入失敗');
+      const [data, draftsData] = await Promise.all([remindersRes.json(), draftsRes.json()]);
+      if (version !== generation.current || activeChild.current !== childId) return;
+      setLoadedChild(childId);
+      setReminders(data);
+      setDrafts(draftsData);
+    } catch (e) {
+      if (version === generation.current) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (version === generation.current) setLoading(false);
     }
   }, [childId]);
 
   useEffect(() => {
+    setShowForm(false); setSelectedTaskForRec(null);
     fetchRemindersAndDrafts();
+    return () => { generation.current++; };
   }, [fetchRemindersAndDrafts]);
 
   // Set default due time to 2 minutes from now (demo friendly)
@@ -181,7 +188,7 @@ export function HandoffPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!childId || submitting) return;
+    if (!childId || activeChild.current !== childId || loadedChild !== childId || submitting) return;
 
     setSubmitting(true);
     setError(null);
@@ -215,6 +222,7 @@ export function HandoffPage() {
   };
 
   const handleConfirmDraft = async (draftId: string) => {
+    if (!childId || activeChild.current !== childId || loadedChild !== childId || loading || !drafts.some(item => item.id === draftId)) { setError('請等候目前孩子資料載入後再操作'); return; }
     try {
       const res = await fetch(`/api/supply-reminders/drafts/${draftId}/confirm`, {
         method: 'POST',
@@ -232,44 +240,44 @@ export function HandoffPage() {
   };
 
   const handleCancelDraft = async (draftId: string) => {
+    if (!childId || activeChild.current !== childId || loadedChild !== childId || loading || !drafts.some(item => item.id === draftId)) { setError('請等候目前孩子資料載入後再操作'); return; }
     try {
       const res = await fetch(`/api/supply-reminders/drafts/${draftId}/cancel`, {
         method: 'POST',
         credentials: 'include',
       });
-      if (res.ok) {
-        await fetchRemindersAndDrafts();
-      }
+      if (!res.ok) throw new Error('操作失敗');
+      await fetchRemindersAndDrafts();
     } catch {
-      // Silently fail
+      setError('操作載入失敗，請重試');
     }
   };
 
   const handlePack = async (reminderId: string) => {
+    if (!childId || activeChild.current !== childId || loadedChild !== childId || loading || !reminders.some(item => item.id === reminderId)) { setError('請等候目前孩子資料載入後再操作'); return; }
     try {
       const res = await fetch(`/api/supply-reminders/${reminderId}/pack`, {
         method: 'POST',
         credentials: 'include',
       });
-      if (res.ok) {
-        await fetchRemindersAndDrafts();
-      }
+      if (!res.ok) throw new Error('操作失敗');
+      await fetchRemindersAndDrafts();
     } catch {
-      // Silently fail
+      setError('操作載入失敗，請重試');
     }
   };
 
   const handleReceive = async (reminderId: string) => {
+    if (!childId || activeChild.current !== childId || loadedChild !== childId || loading || !reminders.some(item => item.id === reminderId)) { setError('請等候目前孩子資料載入後再操作'); return; }
     try {
       const res = await fetch(`/api/supply-reminders/${reminderId}/receive`, {
         method: 'POST',
         credentials: 'include',
       });
-      if (res.ok) {
-        await fetchRemindersAndDrafts();
-      }
+      if (!res.ok) throw new Error('操作失敗');
+      await fetchRemindersAndDrafts();
     } catch {
-      // Silently fail
+      setError('操作載入失敗，請重試');
     }
   };
 
@@ -287,15 +295,21 @@ export function HandoffPage() {
         setRecommendations(data);
       }
     } catch {
-      // Silently fail
+      setError('操作載入失敗，請重試');
     } finally {
       setLoadingRecs(false);
     }
   };
 
+  if (!user) return <main className="p-8 pt-24">請先登入</main>;
+  if (!childId) return <main className="p-8 pt-24">未取得這位孩子的權限</main>;
+  if (loading || (loadedChild !== childId && !error)) return <main role="status" className="p-8 pt-24">載入交接中…</main>;
+  if (error) return <main role="alert" className="p-8 pt-24">{error}<button onClick={fetchRemindersAndDrafts}>重試</button></main>;
   return (
     <main className="cl-main cl-container">
       <div className="flex flex-col gap-4">
+<label>目前孩子 <select value={childId || ''} disabled={submitting} onChange={e => { const next = new URLSearchParams(params); next.set('child_id', e.target.value); setParams(next); }}>{grants.map(g => <option key={g.id} value={g.childId}>{g.childAlias}</option>)}</select></label>
+        {!user ? <p role="alert">請先登入</p> : !childId ? <p role="alert">未取得這位孩子的權限</p> : null}
         {/* Top Header */}
         <div className="flex items-center justify-between">
           <button
@@ -322,21 +336,7 @@ export function HandoffPage() {
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl bg-surface-container-low text-xs text-on-surface-variant flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span>晨間交班 (家長 ➔ 老師)</span>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">已完成</span>
-            </div>
-            <p className="text-[11px] text-on-surface">早餐喝奶 150ml，昨晚睡眠良好無夜驚，體溫 36.5°C 正常。</p>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-surface-container-low text-xs text-on-surface-variant flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span>傍晚交班 (老師 ➔ 家長)</span>
-              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">待接回確認</span>
-            </div>
-            <p className="text-[11px] text-on-surface">精神極佳，午睡約 1 小時 50 分鐘，今日無委託用藥。</p>
-          </div>
+          <p>交接狀態以下方已保存備品紀錄為準。</p>
         </section>
 
         {/* ── AI 用品提醒草稿 (Draft Confirmation Gate) ── */}

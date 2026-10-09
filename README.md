@@ -176,3 +176,6 @@ CareLink/
 ## License
 
 This project was built as a capstone project at National Central University (國立中央大學). Not currently published under an open-source license.
+
+## Competition core-flow hardening
+See [demo runbook](docs/competition-demo-runbook.md) for permanent HTTPS deployment, LINE Console webhook, LIFF endpoint, callback, cookie/proxy checks, two-role verification and fallback video. Deployment is NOT VERIFIED. See [event support matrix](docs/event-support-matrix.md). Production AI debug endpoint is disabled; development requires explicit ENABLE_AI_DEBUG_ENDPOINT=true and AI_DEBUG_SECRET (32+ characters).

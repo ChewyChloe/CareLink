@@ -19,6 +19,7 @@ interface ChildOverviewItem {
 }
 
 export function CalendarPage() {
+  const [childrenPending, setChildrenPending] = useState(true);
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -77,6 +78,7 @@ export function CalendarPage() {
   // Load children list
   useEffect(() => {
     if (isPreview) {
+      setChildrenPending(false);
       setChildId('demo_ty');
       setChildren([{ id: 'demo_ty', nickname: '湯圓', ageText: '1歲3個月' }]);
       setMonthData(previewMonthData);
@@ -86,7 +88,7 @@ export function CalendarPage() {
 
     fetch('/api/children/overview', { credentials: 'include' })
       .then(res => {
-        if (!res.ok) throw new Error('無法取得幼兒資料');
+        if (!res.ok) throw new Error(res.status === 401 ? '請重新登入' : '無法取得幼兒資料');
         return res.json();
       })
       .then(data => {
@@ -104,7 +106,8 @@ export function CalendarPage() {
           setChildId(list[0].id);
         }
       })
-      .catch(err => setError(err.message));
+      .catch(err => setError(err.message))
+      .finally(() => setChildrenPending(false));
   }, [isPreview]);
 
   // Load month summary
@@ -119,7 +122,7 @@ export function CalendarPage() {
 
     fetch(`/api/children/${childId}/calendar?month=${monthKey}`, { credentials: 'include' })
       .then((res) => {
-        if (!res.ok) throw new Error('載入日曆資料失敗');
+        if (!res.ok) throw new Error(res.status === 401 ? '請重新登入' : '載入日曆資料失敗');
         return res.json();
       })
       .then((data: { month: string; days: MonthSummaryData }) => {
@@ -161,6 +164,9 @@ export function CalendarPage() {
   const realTotalFeed = Object.values(monthData).reduce((acc, d) => acc + (d.breakdown?.feed || 0), 0);
   const realTotalSleep = Object.values(monthData).reduce((acc, d) => acc + (d.breakdown?.sleep || 0), 0);
 
+  if (loading || childrenPending) return <main role="status" className="p-8 pt-24">載入中…</main>;
+  if (error) return <main role="alert" className="p-8 pt-24">{error}</main>;
+  if (!isPreview && !childId) return <main className="p-8 pt-24">尚無可查看的孩子。</main>;
   return (
     <main className="flex flex-col relative w-full px-4 pt-4 pb-24 max-w-[760px] mx-auto min-h-screen font-['Plus_Jakarta_Sans',sans-serif]">
       <div className="flex flex-col w-full gap-4">

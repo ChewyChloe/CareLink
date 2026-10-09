@@ -227,7 +227,7 @@ describe('Stage 5: Flex Confirmation & Draft Lifecycle Tests', () => {
 
       // Check brand label, child alias, and status pill in body
       const bodyTexts = JSON.stringify(bubble.body);
-      expect(bodyTexts).toContain('CareLink');
+      expect(bodyTexts).toContain('CARELINK');
       expect(bodyTexts).toContain('小安的今日照護');
       expect(bodyTexts).toContain('待確認');
 
@@ -240,7 +240,7 @@ describe('Stage 5: Flex Confirmation & Draft Lifecycle Tests', () => {
       const footerJson = JSON.stringify(bubble.footer);
       expect(footerJson).toContain('action=confirm_draft&draft_id=draft_123&expected_version=1');
       expect(footerJson).toContain('action=cancel_draft&draft_id=draft_123');
-      expect(footerJson).toContain('https://liff.line.me/test-channel-id/drafts/draft_123');
+      expect(footerJson).toContain('https://liff.line.me/test-channel-id/timeline');
     });
 
     it('should show missing fields warning and disable direct postback confirm if fields missing', () => {
@@ -272,7 +272,7 @@ describe('Stage 5: Flex Confirmation & Draft Lifecycle Tests', () => {
       const footerJson = JSON.stringify(bubble.footer);
       // Confirm postback must NOT be available directly; prompt user to MINI App
       expect(footerJson).not.toContain('action=confirm_draft');
-      expect(footerJson).toContain('在 MINI App 補填必填欄位');
+      expect(footerJson).toContain('改用手動記錄');
     });
 
     it('should build confirmed success Flex bubble with calm consumer wording', () => {

@@ -34,6 +34,11 @@ describe('Stage 3: Relationships, Child Authorization & Invitation Tests', () =>
           }),
         },
         invitation: {
+          updateMany: jest.fn().mockImplementation(async ({ where, data }) => {
+            const inv = invitationsTable.get(where.id);
+            if (!inv || inv.status !== where.status || inv.expires_at <= where.expires_at.gt) return { count: 0 };
+            invitationsTable.set(where.id, { ...inv, ...data }); return { count: 1 };
+          }),
           update: jest.fn().mockImplementation(async ({ where, data }) => {
             const inv = invitationsTable.get(where.id);
             if (!inv) throw new Error('Not found');
@@ -82,6 +87,11 @@ describe('Stage 3: Relationships, Child Authorization & Invitation Tests', () =>
       }),
     },
     invitation: {
+          updateMany: jest.fn().mockImplementation(async ({ where, data }) => {
+            const inv = invitationsTable.get(where.id);
+            if (!inv || inv.status !== where.status || inv.expires_at <= where.expires_at.gt) return { count: 0 };
+            invitationsTable.set(where.id, { ...inv, ...data }); return { count: 1 };
+          }),
       create: jest.fn().mockImplementation(async ({ data }) => {
         const id = `inv_${Date.now()}_${Math.random()}`;
         const record = { id, ...data, created_at: new Date() };

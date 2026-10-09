@@ -10,6 +10,7 @@ export interface FlexDraftItem {
 
 export interface FlexDraftBatchData {
   id: string;
+  child_id?: string | null;
   child_alias?: string;
   status: string;
   lock_version: number;
@@ -49,11 +50,12 @@ export class FlexMessageBuilder {
    * Formats item payload into readable summary string.
    */
   public static formatItemSummary(item: FlexDraftItem): string {
+    if (item.missing_fields?.includes('requires_manual_entry')) return '此項尚未記錄；請改用手動記錄';
     const p = item.payload || {};
     const parts: string[] = [];
 
     const amount = p.amount !== undefined ? p.amount : p.amount_ml;
-    const unit = p.amount_unit || (amount !== undefined ? 'ml' : '');
+    const unit = p.amount_unit || (amount !== undefined ? '單位未指定' : '');
     if (amount !== undefined) {
       parts.push(`${amount} ${unit}`.trim());
     }
@@ -403,7 +405,8 @@ export class FlexMessageBuilder {
       });
     });
 
-    const liffUrl = `https://liff.line.me/${miniAppChannelId}/drafts/${draft.id}`;
+    const childQuery = draft.child_id ? `?child_id=${encodeURIComponent(draft.child_id)}` : '';
+    const liffUrl = `https://liff.line.me/${miniAppChannelId}/${hasMissingFields ? 'entry' : 'timeline'}${childQuery}`;
 
     // Status Note (AI Callout banner)
     const calloutBanner = {
@@ -427,7 +430,7 @@ export class FlexMessageBuilder {
         },
         {
           type: 'text',
-          text: 'CareLink AI 已整理好，請家長確認內容。',
+          text: hasMissingFields ? '草稿尚未成為照護紀錄，請改用手動記錄。' : '草稿尚未成為照護紀錄，請核對後確認。',
           size: 'xxs',
           color: '#4A463F',
           wrap: true,
@@ -450,7 +453,7 @@ export class FlexMessageBuilder {
           type: 'postback',
           label: `確認 ${draft.items.length} 筆記錄`,
           data: `action=confirm_draft&draft_id=${draft.id}&expected_version=${draft.lock_version}`,
-          displayText: '已確認照護紀錄',
+          displayText: '要求確認照護紀錄',
         },
       });
     }
@@ -464,7 +467,7 @@ export class FlexMessageBuilder {
         height: 'sm',
         action: {
           type: 'uri',
-          label: hasMissingFields ? '在 MINI App 補填必填欄位' : '查看 / 修改',
+          label: hasMissingFields ? '改用手動記錄' : '查看已保存紀錄',
           uri: liffUrl,
         },
       },
@@ -480,7 +483,7 @@ export class FlexMessageBuilder {
           type: 'postback',
           label: '捨棄',
           data: `action=cancel_draft&draft_id=${draft.id}`,
-          displayText: '已捨棄草稿',
+          displayText: '要求捨棄草稿',
         },
       });
     }

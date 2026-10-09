@@ -57,22 +57,22 @@ export function BillingPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const periodParam = searchParams.get('period') || '2026-09';
+  const periodParam = searchParams.get('period') || new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit' }).format(new Date());
   const childIdParam = searchParams.get('child_id') || searchParams.get('childId') || '';
 
   const [settlement, setSettlement] = useState<SettlementData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [confirmed, setConfirmed] = useState(false);
   const [showEvidenceModal, setShowEvidenceModal] = useState(false);
 
   const targetChildId = childIdParam || user?.grants?.[0]?.childId || '';
   const isExplicitDemo = searchParams.get('demo') === 'true';
-  const allowDevFallback = Boolean(import.meta.env.DEV && isExplicitDemo);
+  const allowDevFallback = Boolean(import.meta.env.DEV && isExplicitDemo && !targetChildId);
 
   useEffect(() => {
     setLoading(true);
     setError('');
+    setSettlement(null);
 
     if (!targetChildId && !allowDevFallback) {
       setError('未選取受託幼兒，請由寶寶列表選取或重新登入。');
@@ -87,11 +87,9 @@ export function BillingPage() {
     fetch(fetchUrl, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) {
-          if (allowDevFallback) {
-            return fetch(`/api/billing/demo-showcase?period=${periodParam}`).then((r) => r.json());
-          }
+
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.message || `載入費用結算失敗 (${res.status})`);
+          throw new Error(res.status === 401 ? '請重新登入' : errData.message || `載入費用結算失敗 (${res.status})`);
         }
         return res.json();
       })
@@ -133,6 +131,7 @@ export function BillingPage() {
     );
   }
 
+  if (!error && !settlement) return <main className="p-8 pt-24">尚無費用結算資料。</main>;
   if (error || !settlement) {
     return (
       <main className="flex flex-col relative w-full px-4 pt-20 pb-24 max-w-[760px] mx-auto min-h-screen bg-[#fbf9f5]">
@@ -150,6 +149,7 @@ export function BillingPage() {
   return (
     <main className="flex flex-col relative w-full px-4 pt-20 pb-32 max-w-[760px] mx-auto min-h-screen bg-[#fbf9f5]">
       <div className="flex flex-col w-full gap-4">
+        {allowDevFallback && <p role="status">DEMO / 合成資料</p>}
         {/* Top Header */}
         <div className="flex items-center justify-between">
           <button
@@ -185,12 +185,10 @@ export function BillingPage() {
               className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${
                 isBlocked
                   ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                  : confirmed
-                  ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
                   : 'bg-rose-100 text-[#a93349] border border-rose-200'
               }`}
             >
-              {isBlocked ? '待補資料 (BLOCKED)' : confirmed ? '已確認版本紀錄' : '待家長核對'}
+              {isBlocked ? '待補資料 (BLOCKED)' : '待家長核對'}
             </span>
           </div>
 
@@ -392,27 +390,7 @@ export function BillingPage() {
           </div>
         )}
 
-        {/* 4. Guardian Version Acknowledgment Button */}
-        <div className="pt-2 pb-6 flex flex-col gap-2">
-          <button
-            type="button"
-            disabled={isBlocked}
-            className={`w-full py-3.5 rounded-full font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 ${
-              isBlocked
-                ? 'bg-stone-200 text-stone-400 cursor-not-allowed'
-                : confirmed
-                ? 'bg-emerald-600 text-white'
-                : 'bg-[#a93349] text-white hover:opacity-95 active:scale-98'
-            }`}
-            onClick={() => setConfirmed(!confirmed)}
-          >
-            <span className="material-symbols-outlined text-[20px]">
-              {confirmed ? 'verified' : 'task_alt'}
-            </span>
-            <span>{confirmed ? '已完成本月費用版本核對' : '確認本月費用版本紀錄'}</span>
-          </button>
-
-          {/* Small non-legal disclaimer */}
+        <div className="pt-2 pb-6"><p>費用依據；此頁不保存確認。</p>
           <p className="text-center text-[11px] text-stone-500 leading-relaxed px-4">
             CareLink 費用紀錄由托育事實與契約條款確定性換算，保留版本歷史，不取代正式發票或收據。
           </p>

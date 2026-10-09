@@ -18,7 +18,7 @@ function loadSource(file, mocks, env = {}) {
   const exports = {};
   vm.runInNewContext(compiled, {
     exports, __env: env, console: { info() {} },
-    window: { location: { href: 'https://example.test/' } },
+    window: { location: { href: 'https://example.test/', search: '', pathname: '/' } }, URLSearchParams,
     require: name => Object.hasOwn(mocks, name) ? mocks[name] : require(name),
   }, { filename: file });
   return exports;
@@ -75,7 +75,7 @@ for (const [name, auth, expected] of [
   ['initializing', { loading: true, liffStatus: null }, false],
   ['failed', { loading: false, liffStatus: { isReady: false, error: 'failed' } }, false],
   ['session pending', { loading: true, liffStatus: { isReady: true } }, false],
-  ['ready', { loading: false, liffStatus: { isReady: true } }, true],
+  ['ready', { user: { id: 'synthetic' }, loading: false, liffStatus: { isReady: true } }, true],
 ]) {
   test(`router is gated while ${name}`, () => {
     let mounted = false;
@@ -83,6 +83,15 @@ for (const [name, auth, expected] of [
       './auth/AuthContext': { useAuth: () => auth },
       './components/Navigation': { Navigation: () => null },
       './pages/TimelinePage': { TimelinePage: () => null },
+      './pages/ChildrenPage': { ChildrenPage: () => null },
+      './pages/NewEntryPage': { NewEntryPage: () => null },
+      './pages/ReportsPage': { ReportsPage: () => null },
+      './pages/CalendarPage': { CalendarPage: () => null },
+      './pages/BillingPage': { BillingPage: () => null },
+      './pages/ContractPage': { ContractPage: () => null },
+      './pages/HandoffPage': { HandoffPage: () => null },
+      './pages/AcceptInvitePage': { AcceptInvitePage: () => null },
+      './pages/InvitationsPage': { InvitationsPage: () => null },
       './pages/DevPage': { DevPage: () => null },
       'react-router-dom': {
         BrowserRouter: () => { mounted = true; return null; },

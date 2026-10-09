@@ -69,6 +69,23 @@ export class AiService {
       messageSentAt,
     });
 
+    const unsupported = extractionResult.output.unsupported || [];
+    for (const [pattern, type] of [
+      [/換.*尿布|尿布.*(?:換|濕|便)|尿濕/, 'DIAPER'], [/體溫|耳溫|額溫|溫度|度C|°C/i, 'TEMPERATURE'],
+      [/藥|糖漿|medicine/i, 'MEDICATION'], [/洗澡|清潔|換衣/, 'HYGIENE'],
+      [/身高|體重|頭圍/, 'GROWTH'], [/大便|排便|便便/, 'BOWEL_MOVEMENT'],
+      [/遊戲|繪本|散步|活動|共讀/, 'ACTIVITY'], [/備註|備忘|叮嚀|留言/, 'NOTE'],
+    ] as Array<[RegExp, string]>) {
+      if (pattern.test(options.text) && !unsupported.some(item => item.event_type === type)) unsupported.push({ reason: 'requires_manual_entry', event_type: type });
+    }
+    if (unsupported.length) { extractionResult.output.unsupported = unsupported; extractionResult.output.requires_user_input = true; }
+    if (!extractionResult.output.events.length && !extractionResult.output.supply_needs?.length) {
+      extractionResult.output.unsupported = unsupported.length ? unsupported : [{ reason: 'requires_manual_entry', event_type: 'UNRECOGNIZED' }];
+      extractionResult.output.requires_user_input = true;
+    }
+    if (unsupported.some(item => item.event_type === 'MEDICATION')) {
+      extractionResult.output.events = extractionResult.output.events.filter(e => !(e.event_type === 'FEED' && (e.payload.feed_type === 'MEDICINE' || /藥|糖漿|medicine/i.test(e.source_span))));
+    }
     // 4. Safe Logging (Compliant with Privacy Rule)
     this.logger.log({
       msg: 'Care extraction completed',
@@ -95,7 +112,7 @@ export class AiService {
       configured: this.hasGeminiKey,
       model: configuredModel.trim(),
       verificationStatus: this.hasGeminiKey
-        ? 'IMPLEMENTATION_COMPLETE'
+        ? 'LIVE_GEMINI_VERIFICATION_PENDING'
         : 'LIVE_GEMINI_VERIFICATION_PENDING',
     };
   }
