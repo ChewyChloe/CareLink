@@ -1,3 +1,4 @@
+import { useAuth } from '../auth/AuthContext';
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -50,7 +51,8 @@ export const ChildrenPage: React.FC = () => {
   }).format(new Date());
 
   const [searchParams] = useSearchParams();
-  const isPreview = typeof window !== 'undefined' && (
+  const { user } = useAuth();
+  const isPreview = !user && typeof window !== 'undefined' && (
     searchParams.get('preview') === 'true' ||
     searchParams.get('demo') === 'true'
   );
@@ -117,7 +119,7 @@ export const ChildrenPage: React.FC = () => {
       setError(null);
       const res = await fetch('/api/children/overview', { credentials: 'include' });
       if (!res.ok) {
-        throw new Error(`載入幼兒列表失敗 (${res.status})`);
+        throw new Error(res.status === 401 ? '請重新登入' : `載入幼兒列表失敗 (${res.status})`);
       }
       const data = await res.json();
       setChildren(data.children || []);
@@ -137,6 +139,8 @@ export const ChildrenPage: React.FC = () => {
     return b.todayRecordCount - a.todayRecordCount;
   });
 
+  if (loading) return <main role="status" className="p-8 pt-24">載入中…</main>;
+  if (error) return <main role="alert" className="p-8 pt-24">{error}</main>;
   return (
     <div className="w-full min-h-screen bg-surface font-body-md text-body-md text-on-surface flex flex-col pb-28">
       {/* Top Header */}

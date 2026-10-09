@@ -48,10 +48,10 @@ describe('Stage 6.5.1: Flex Message Builder & Golden Path Regression Tests', () 
       expect(bubbleRawJson).not.toContain('Invalid Date');
 
       // Verify Redesigned Brand & Title Hierarchy
-      expect(bubbleRawJson).toContain('CareLink');
+      expect(bubbleRawJson).toContain('CARELINK');
       expect(bubbleRawJson).toContain('湯圓的今日照護');
       expect(bubbleRawJson).toContain('待確認');
-      expect(bubbleRawJson).toContain('CareLink AI 已整理好，請家長確認內容。');
+      expect(bubbleRawJson).toContain('草稿尚未成為照護紀錄，請核對後確認。');
 
       // Verify FEED content
       expect(bubbleRawJson).toContain('11:40');
@@ -64,7 +64,7 @@ describe('Stage 6.5.1: Flex Message Builder & Golden Path Regression Tests', () 
 
       // Verify Actions hierarchy
       expect(bubbleRawJson).toContain('確認 2 筆記錄');
-      expect(bubbleRawJson).toContain('查看 / 修改');
+      expect(bubbleRawJson).toContain('查看已保存紀錄');
       expect(bubbleRawJson).toContain('捨棄');
 
       // Also test with ISO 8601 strings (2026-09-17T03:40:00.000Z is 11:40 UTC+8)

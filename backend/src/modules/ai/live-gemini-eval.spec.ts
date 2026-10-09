@@ -58,11 +58,11 @@ describe('Phase A: Live Gemini Separate Evaluation Suite (18 Cases)', () => {
   const model = (process.env.GEMINI_MODEL || 'gemini-3.6-flash').trim();
 
   if (!hasLiveKey) {
-    it('status: LIVE_GEMINI_VERIFICATION_PENDING (GEMINI_API_KEY is empty or not set)', () => {
+    it('requires a configured GEMINI_API_KEY for full-suite verification', () => {
       console.log(
         '\n[LIVE_GEMINI_EVAL] Status: LIVE_GEMINI_VERIFICATION_PENDING. GEMINI_API_KEY not configured in backend/.env. Live network call skipped.',
       );
-      expect(hasLiveKey).toBe(false);
+      expect(hasLiveKey).toBe(true);
     });
     return;
   }
@@ -200,10 +200,6 @@ describe('Phase A: Live Gemini Separate Evaluation Suite (18 Cases)', () => {
     });
     console.log('================================================================\n');
 
-    if (quotaCount > 0) {
-      expect(passedCount + quotaCount).toBeGreaterThanOrEqual(15);
-    } else {
-      expect(passedCount).toBeGreaterThanOrEqual(15);
-    }
+    expect(passedCount).toBeGreaterThanOrEqual(15);
   }, 120000);
 });

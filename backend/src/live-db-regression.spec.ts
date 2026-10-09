@@ -123,7 +123,7 @@ describe('Live PostgreSQL Integration & Regression Suite (Neon carelink-dev)', (
     } catch (cleanupErr) {
       console.warn('Cleanup warning:', cleanupErr);
     }
-    await prisma.$disconnect();
+    await prisma.onModuleDestroy();
   });
 
   // ===========================================================================

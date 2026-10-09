@@ -55,7 +55,7 @@ export class AuthService {
     }
 
     // Seed test care data (湯圓 / CAREGIVER / CARE_WRITE) in development if none exists
-    await this.ensureDevSyntheticSeed(user.id);
+
 
     const { token, session } = await this.sessionService.createSession(user.id, user.line_sub, providerId);
     const cookieOptions = this.sessionService.getCookieOptions();
@@ -170,7 +170,7 @@ export class AuthService {
    * Returns current user profile with active access grants.
    */
   async getMe(userId: string) {
-    await this.ensureDevSyntheticSeed(userId);
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {

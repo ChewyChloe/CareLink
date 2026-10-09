@@ -37,7 +37,7 @@ export class ContractsService {
       status: 'AGREED',
       child_id: childId,
       child_alias: childAlias,
-      caregiver_name: '李老師 (愛苗托育中心)',
+      caregiver_name: '合成保母',
       effective_from: '2026-09-01T00:00:00+08:00',
       effective_to: '2027-08-31T23:59:59+08:00',
       scheduled_start: '09:00',
@@ -46,8 +46,8 @@ export class ContractsService {
       overtime_unit_price: 98,
       base_monthly_amount: 18000,
       content_hash: 'cv_hash_202609_immutable',
-      guardian_ack_at: '2026-09-01T10:00:00+08:00',
-      caregiver_ack_at: '2026-09-01T10:05:00+08:00',
+      guardian_ack_at: null,
+      caregiver_ack_at: null,
     };
   }
 
@@ -56,9 +56,6 @@ export class ContractsService {
    * Enforces AccessGrant authorization.
    */
   async getContractForChild(childId: string, userId: string): Promise<ContractDetailsDto> {
-    if (childId === 'demo_ty') {
-      return this.getDemoContract(childId, '湯圓');
-    }
 
     // Verify AccessGrant
     const grant = await this.prisma.accessGrant.findFirst({
@@ -66,6 +63,8 @@ export class ContractsService {
         user_id: userId,
         child_id: childId,
         revoked_at: null,
+        starts_at: { lte: new Date() },
+        OR: [{ ends_at: null }, { ends_at: { gt: new Date() } }],
       },
       include: {
         child: true,
@@ -116,7 +115,7 @@ export class ContractsService {
       status: version.status,
       child_id: childId,
       child_alias: contract.relationship.child?.display_alias || grant.child?.display_alias || '寶貝',
-      caregiver_name: contract.relationship.caregiver?.display_name_ciphertext || '李老師 (愛苗托育中心)',
+      caregiver_name: contract.relationship.caregiver?.display_name_ciphertext || '合成保母',
       effective_from: version.effective_from.toISOString(),
       effective_to: version.effective_to ? version.effective_to.toISOString() : '2027-08-31T23:59:59+08:00',
       scheduled_start: schedule.scheduled_start || '09:00',

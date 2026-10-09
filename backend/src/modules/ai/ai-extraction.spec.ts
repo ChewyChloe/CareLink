@@ -343,6 +343,7 @@ describe('Stage 4: AI Care Event Extraction Specification', () => {
           author_user_id: 'user_1',
         },
         accessGrant: {
+          findFirst: jest.fn().mockResolvedValue({ relationship_id: null }),
           findMany: jest.fn().mockResolvedValue([
             { id: 'grant_1', child: { id: 'child_1', display_alias: '樂樂' } },
           ]),

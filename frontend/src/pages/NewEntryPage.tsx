@@ -46,6 +46,8 @@ export const NewEntryPage: React.FC = () => {
   const [children, setChildren] = useState<ChildInfo[]>([]);
   const [selectedChildId, setSelectedChildId] = useState<string>('');
   const [selectedChildName, setSelectedChildName] = useState<string>('寶貝');
+  const [loadError, setLoadError] = useState('');
+  const [loadPending, setLoadPending] = useState(true);
   const [summary, setSummary] = useState<DailySummaryMetrics | null>(null);
   const [activeModal, setActiveModal] = useState<ModalCategory>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -131,6 +133,7 @@ export const NewEntryPage: React.FC = () => {
   const fetchInitialChildren = async () => {
     try {
       const res = await fetch('/api/children', { credentials: 'include' });
+      if (!res.ok) throw new Error(res.status === 401 ? '請重新登入' : '資料載入失敗');
       if (res.ok) {
         const data = await res.json();
         setChildren(data || []);
@@ -142,20 +145,22 @@ export const NewEntryPage: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error(err);
-    }
+      setLoadError((err as Error).message);
+    } finally { setLoadPending(false); }
   };
 
   const fetchSummary = async (childId: string) => {
+    setSummary(null); setLoadPending(true); setLoadError('');
     try {
       const res = await fetch(`/api/children/${childId}/summary`, { credentials: 'include' });
+      if (!res.ok) throw new Error(res.status === 401 ? '請重新登入' : '摘要載入失敗');
       if (res.ok) {
         const data = await res.json();
         setSummary(data);
       }
     } catch (err) {
-      console.error(err);
-    }
+      setLoadError((err as Error).message);
+    } finally { setLoadPending(false); }
   };
 
   const handleOpenModal = (category: ModalCategory) => {
@@ -320,6 +325,9 @@ export const NewEntryPage: React.FC = () => {
   const targetRecords = 10;
   const progressPercent = Math.min(100, Math.round((totalRecordedCount / targetRecords) * 100));
 
+  if (loadPending) return <main role="status" className="p-8 pt-24">載入中…</main>;
+  if (loadError) return <main role="alert" className="p-8 pt-24">{loadError}</main>;
+  if (!selectedChildId) return <main className="p-8 pt-24">尚無可記錄的孩子。</main>;
   return (
     <div className="w-full min-h-screen bg-surface font-body-md text-body-md text-on-surface flex flex-col pb-28">
       {/* Header */}

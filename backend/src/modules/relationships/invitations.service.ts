@@ -29,6 +29,7 @@ export class InvitationsService {
    * Only token_hash is persisted in DB.
    */
   async createInvitation(guardianUserId: string, dto: CreateInvitationDto) {
+    if (!['CAREGIVER', 'CO_PARENT'].includes(dto.targetRole)) throw new BadRequestException('Invalid target role');
     const now = new Date();
 
     // Verify user has an active GUARDIAN grant for this child
@@ -109,19 +110,20 @@ export class InvitationsService {
     }
 
     // Mark as ACCEPTED and record accepted_by; NO ACCESS GRANTED YET
-    const updated = await this.prisma.invitation.update({
-      where: { id: invitation.id },
+    const claim = await this.prisma.invitation.updateMany({
+      where: { id: invitation.id, status: 'PENDING', expires_at: { gt: new Date() } },
       data: {
         status: 'ACCEPTED',
         accepted_by: inviteeUserId,
       },
     });
 
+    if (claim.count !== 1) throw new BadRequestException('Invitation already used or expired');
     return {
       status: 'accepted',
-      invitationId: updated.id,
-      childId: updated.child_id,
-      targetRole: updated.target_role,
+      invitationId: invitation.id,
+      childId: invitation.child_id,
+      targetRole: invitation.target_role,
       message: 'Invitation accepted. Awaiting guardian activation to grant access.',
     };
   }
@@ -167,10 +169,11 @@ export class InvitationsService {
       throw new BadRequestException(`Cannot activate invitation with status '${invitation.status}'`);
     }
 
+    if (invitation.expires_at <= now) throw new BadRequestException('Invitation has expired');
     return this.prisma.$transaction(async (tx) => {
       // 1. Mark invitation ACTIVE and consumed
-      await tx.invitation.update({
-        where: { id: invitation.id },
+      const claimed = await tx.invitation.updateMany({
+        where: { id: invitation.id, status: 'ACCEPTED', expires_at: { gt: now } },
         data: {
           status: 'ACTIVE',
           approved_by: guardianUserId,
@@ -178,6 +181,7 @@ export class InvitationsService {
         },
       });
 
+      if (claimed.count !== 1) throw new BadRequestException('Invitation already activated or expired');
       // 2. Create CareRelationship
       const careRelationship = await tx.careRelationship.create({
         data: {
@@ -195,7 +199,7 @@ export class InvitationsService {
           child_id: invitation.child_id,
           relationship_id: careRelationship.id,
           role: invitation.target_role,
-          scopes: ['CARE_READ', 'CARE_WRITE', 'HANDOFF_WRITE', 'CONTRACT_READ', 'BILLING_READ'],
+          scopes: invitation.target_role === 'CAREGIVER' ? ['CARE_READ', 'CARE_WRITE', 'HANDOFF_WRITE', 'CONTRACT_READ', 'BILLING_READ'] : ['CARE_READ', 'HANDOFF_WRITE', 'CONTRACT_READ', 'BILLING_READ'],
           starts_at: new Date(),
         },
       });
@@ -208,4 +212,18 @@ export class InvitationsService {
       };
     });
   }
+  async getInvitation(inviteeUserId: string, rawToken: string) {
+    if (!/^[a-f0-9]{64}$/.test(rawToken)) throw new NotFoundException('Invalid invitation');
+    const invitation = await this.prisma.invitation.findUnique({ where: { token_hash: this.hashToken(rawToken) }, include: { child: true } });
+    if (!invitation || invitation.expires_at <= new Date() || invitation.inviter_id === inviteeUserId ||
+      (invitation.status !== 'PENDING' && invitation.accepted_by !== inviteeUserId)) throw new NotFoundException('Invitation unavailable');
+    return { childAlias: invitation.child.display_alias, inviter: '具備孩子權限的家長', targetRole: invitation.target_role, status: invitation.status };
+  }
+  async listInvitations(guardianUserId: string, childId: string) {
+    const now = new Date();
+    const grant = await this.prisma.accessGrant.findFirst({ where: { user_id: guardianUserId, child_id: childId, role: 'GUARDIAN', revoked_at: null, starts_at: { lte: now }, OR: [{ ends_at: null }, { ends_at: { gt: now } }] } });
+    if (!grant) throw new NotFoundException('Guardian access required');
+    return this.prisma.invitation.findMany({ where: { child_id: childId }, select: { id: true, status: true, target_role: true, accepted_by: true, expires_at: true }, orderBy: { created_at: 'desc' } });
+  }
+
 }

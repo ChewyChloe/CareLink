@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { liffService, LiffInitResult } from '../lib/liff/liff';
+import { rememberInvitationToken } from '../lib/invitation-token';
 
 export interface UserGrant {
   id: string;
@@ -45,8 +46,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUser(data);
         return true;
       }
+      setUser(null);
+      if (res.status !== 401) setError(`登入資料載入失敗 (${res.status})`);
       return false;
     } catch {
+      setUser(null); setError('登入資料載入失敗，請重試');
       return false;
     }
   };
@@ -79,6 +83,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let isMounted = true;
 
     const bootstrapAuth = async () => {
+      // Preserve invite intent before LIFF consumes its callback parameters.
+      rememberInvitationToken(window.location.search, sessionStorage);
       setLoading(true);
       setError(null);
 

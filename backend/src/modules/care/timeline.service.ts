@@ -165,6 +165,7 @@ export class TimelineService {
         user_id: userId,
         child_id: childId,
         revoked_at: null,
+        starts_at: { lte: new Date() },
         OR: [{ ends_at: null }, { ends_at: { gt: new Date() } }],
       },
       include: {
@@ -486,6 +487,7 @@ export class TimelineService {
       if (attachedInstruction.revoked_at) {
         throw new BadRequestException('Cannot attach a revoked guardian instruction');
       }
+      if (dto.event_type === 'MEDICATION' && attachedInstruction.instruction_type !== 'MEDICATION') throw new BadRequestException('A comment or pickup note is not medication authorization');
     }
 
     const now = new Date();
@@ -684,6 +686,7 @@ export class TimelineService {
     if (!dto.content || !dto.content.trim()) {
       throw new BadRequestException('content is required');
     }
+    if (dto.content.length > 2000 || (dto.instruction_type && !['MEDICATION', 'COMMENT', 'PICKUP_NOTE'].includes(dto.instruction_type))) throw new BadRequestException('Invalid instruction type or content length');
 
     const instruction = await this.prisma.$transaction(async (tx) => {
       const created = await tx.guardianInstruction.create({
@@ -705,7 +708,7 @@ export class TimelineService {
           metadata_minimal: {
             child_id: childId,
             instruction_type: dto.instruction_type || 'MEDICATION',
-            content: dto.content.trim(),
+            content_length: dto.content.trim().length,
           },
         },
       });
@@ -717,6 +720,7 @@ export class TimelineService {
       id: instruction.id,
       child_id: instruction.child_id,
       created_by_guardian_user_id: instruction.created_by_guardian_user_id,
+      author_user_id: instruction.created_by_guardian_user_id,
       instruction_type: instruction.instruction_type,
       content: instruction.content,
       created_at: instruction.created_at.toISOString(),
@@ -774,6 +778,7 @@ export class TimelineService {
       id: updated.id,
       child_id: updated.child_id,
       created_by_guardian_user_id: updated.created_by_guardian_user_id,
+      author_user_id: updated.created_by_guardian_user_id,
       instruction_type: updated.instruction_type,
       content: updated.content,
       created_at: updated.created_at.toISOString(),
@@ -799,6 +804,7 @@ export class TimelineService {
       id: item.id,
       child_id: item.child_id,
       created_by_guardian_user_id: item.created_by_guardian_user_id,
+      author_user_id: item.created_by_guardian_user_id,
       instruction_type: item.instruction_type,
       content: item.content,
       created_at: item.created_at.toISOString(),

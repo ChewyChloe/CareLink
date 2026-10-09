@@ -31,15 +31,15 @@ export function ContractPage() {
   const [contract, setContract] = useState<ContractData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [acknowledged, setAcknowledged] = useState(false);
 
   const targetChildId = childIdParam || user?.grants?.[0]?.childId || '';
   const isExplicitDemo = searchParams.get('demo') === 'true';
-  const allowDevFallback = Boolean(import.meta.env.DEV && isExplicitDemo);
+  const allowDevFallback = Boolean(import.meta.env.DEV && isExplicitDemo && !targetChildId);
 
   useEffect(() => {
     setLoading(true);
     setError('');
+    setContract(null);
 
     if (!targetChildId && !allowDevFallback) {
       setError('未選取受託幼兒，請由寶寶列表選取或重新登入。');
@@ -54,11 +54,9 @@ export function ContractPage() {
     fetch(fetchUrl, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) {
-          if (allowDevFallback) {
-            return fetch('/api/contracts/demo-showcase').then((r) => r.json());
-          }
+
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.message || `載入契約失敗 (${res.status})`);
+          throw new Error(res.status === 401 ? '請重新登入' : errData.message || `載入契約失敗 (${res.status})`);
         }
         return res.json();
       })
@@ -79,13 +77,14 @@ export function ContractPage() {
       const t = new Date(toStr).toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' });
       return `${f} 至 ${t}`;
     } catch {
-      return '2026/09/01 至 2027/08/31';
+      return '日期資料無效';
     }
   };
 
   return (
     <main className="flex flex-col relative w-full px-4 pt-20 pb-32 max-w-[760px] mx-auto min-h-screen bg-[#fbf9f5]">
       <div className="flex flex-col w-full gap-4">
+        {allowDevFallback && <p role="status">DEMO / 合成資料</p>}
         {/* Top Header */}
         <div className="flex items-center justify-between">
           <button
@@ -179,30 +178,13 @@ export function ContractPage() {
               </div>
             </section>
 
-            {/* Acknowledgment Action Card */}
-            <div className="flex flex-col gap-2 pt-2">
-              <button
-                type="button"
-                className={`w-full py-3.5 rounded-full font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-2 ${
-                  acknowledged
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-[#a93349] text-white hover:opacity-95 active:scale-98'
-                }`}
-                onClick={() => setAcknowledged(!acknowledged)}
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  {acknowledged ? 'check_circle' : 'task_alt'}
-                </span>
-                <span>{acknowledged ? '已確認此版本紀錄' : '確認契約版本紀錄'}</span>
-              </button>
-
-              {/* Non-legal disclaimer (Required by Section J & D) */}
+            <div className="flex flex-col gap-2 pt-2"><p>契約版本檢視；此頁不保存確認。</p>
               <p className="text-center text-[11px] text-stone-500 leading-relaxed px-4 pt-2">
-                此頁顯示雙方目前確認的契約版本。CareLink 保留版本紀錄，不取代正式法律文件。
+                此頁顯示目前契約版本。CareLink 保留版本紀錄，不取代正式法律文件。
               </p>
             </div>
           </>
-        ) : null}
+        ) : <p>尚無契約版本資料。</p>}
       </div>
     </main>
   );

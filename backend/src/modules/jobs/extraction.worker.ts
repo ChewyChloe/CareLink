@@ -200,42 +200,11 @@ export class ExtractionWorker implements OnModuleInit, OnModuleDestroy {
         where: {
           user_id: sourceMessage.author_user_id,
           revoked_at: null,
+          starts_at: { lte: new Date() },
           OR: [{ ends_at: null }, { ends_at: { gt: new Date() } }],
         },
         include: { child: true },
       });
-
-      if (grants.length === 0 && typeof (this.prisma as any)?.child?.create === 'function') {
-        // Dev synthetic seed fallback (湯圓 / CAREGIVER / CARE_WRITE)
-        let child = await this.prisma.child.findFirst({
-          where: { display_alias: '湯圓', created_by: sourceMessage.author_user_id },
-        });
-        if (!child) {
-          child = await this.prisma.child.create({
-            data: { display_alias: '湯圓', created_by: sourceMessage.author_user_id },
-          });
-        }
-        let rel = await this.prisma.careRelationship.findFirst({
-          where: { child_id: child.id, caregiver_user_id: sourceMessage.author_user_id, status: 'ACTIVE' },
-        });
-        if (!rel) {
-          rel = await this.prisma.careRelationship.create({
-            data: { child_id: child.id, caregiver_user_id: sourceMessage.author_user_id, status: 'ACTIVE', starts_at: new Date() },
-          });
-        }
-        const grant = await this.prisma.accessGrant.create({
-          data: {
-            user_id: sourceMessage.author_user_id,
-            child_id: child.id,
-            relationship_id: rel.id,
-            role: 'CAREGIVER',
-            scopes: ['CARE_READ', 'CARE_WRITE', 'HANDOFF_WRITE'],
-            starts_at: new Date(),
-          },
-          include: { child: true },
-        });
-        grants = [grant];
-      }
 
       authorizedChildren = grants
         .filter((g) => g.child)
@@ -247,6 +216,7 @@ export class ExtractionWorker implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    if (!authorizedChildren.length) { await this.markJobDead(job.id, 'NO_AUTHORIZED_CHILDREN'); return { jobId, status: 'DEAD', errorCode: 'NO_AUTHORIZED_CHILDREN' }; }
     // 7. Execute AI Extraction with Sanitization
     try {
       const referenceDate = sourceMessage.received_at.toISOString().split('T')[0];
@@ -283,6 +253,19 @@ export class ExtractionWorker implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      const childIds = new Set(extraction.output.events.map(e => e.child_ref ? extraction.tokenToChildIdMap[e.child_ref] : null).filter(Boolean));
+      if (childIds.size > 1) {
+        targetChildId = null;
+        extraction.output.events = [];
+        extraction.output.unsupported = [{ reason: 'requires_manual_entry', event_type: 'MULTI_CHILD' }];
+        extraction.output.requires_user_input = true;
+      }
+      // Resolve the relationship for the selected child, not the first grant.
+      relationshipId = null;
+      if (targetChildId) {
+        const grant = await this.prisma.accessGrant.findFirst({ where: { child_id: targetChildId, user_id: sourceMessage.author_user_id!, revoked_at: null, starts_at: { lte: new Date() }, OR: [{ ends_at: null }, { ends_at: { gt: new Date() } }] } });
+        relationshipId = grant?.relationship_id || null;
+      }
       // 9. Determine DraftBatch Status
       const hasUnresolvedItems =
         extraction.output.requires_user_input ||
@@ -295,12 +278,10 @@ export class ExtractionWorker implements OnModuleInit, OnModuleDestroy {
         const itemOccurredAt = this.resolveOccurredAtToIso(ev.occurred_at, sourceMessage.received_at) || ev.occurred_at;
         const payload = { ...(ev.payload || {}) };
         const amountVal = payload.amount !== undefined ? payload.amount : payload.amount_ml;
-        if (amountVal !== undefined) {
+        if (ev.event_type === 'FEED' && amountVal !== undefined && ['ml', 'cc'].includes(String(payload.amount_unit).toLowerCase())) {
           payload.amount = amountVal;
           payload.amount_ml = amountVal;
-          if (!payload.amount_unit) {
-            payload.amount_unit = 'ml';
-          }
+
         }
         return {
           ...ev,
@@ -310,6 +291,10 @@ export class ExtractionWorker implements OnModuleInit, OnModuleDestroy {
         };
       });
 
+      for (const unsupported of extraction.output.unsupported || []) normalizedItems.push({
+        item_index: normalizedItems.length, event_type: unsupported.event_type as any, temporal_status: 'UNCERTAIN', occurred_at: null,
+        payload: {}, child_ref: null, confidence: 0, missing_fields: ['requires_manual_entry'],
+      } as any);
       // 10. Persist DraftBatch (NEVER CONFIRMED in Stage 4)
       const draft = await this.prisma.draftBatch.create({
         data: {
@@ -335,6 +320,7 @@ export class ExtractionWorker implements OnModuleInit, OnModuleDestroy {
           const childAlias = authorizedChildren.find((c) => c.id === targetChildId)?.displayAlias || '受托幼兒';
           const flexData: FlexDraftBatchData = {
             id: draft.id,
+            child_id: draft.child_id,
             child_alias: childAlias,
             status: draft.status,
             lock_version: draft.lock_version,

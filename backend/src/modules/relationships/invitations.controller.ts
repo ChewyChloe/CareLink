@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Post,
   Param,
   Body,
@@ -17,6 +18,10 @@ import { CsrfOriginGuard } from '../../common/guards/csrf-origin.guard';
 export class InvitationsController {
   constructor(private readonly invitationsService: InvitationsService) {}
 
+  @Get(['invitations/:token', 'api/invitations/:token'])
+  getInvitation(@CurrentUser() user: AuthenticatedUser, @Param('token') token: string) { return this.invitationsService.getInvitation(user.id, token); }
+  @Get(['children/:childId/invitations', 'api/children/:childId/invitations'])
+  listInvitations(@CurrentUser() user: AuthenticatedUser, @Param('childId') childId: string) { return this.invitationsService.listInvitations(user.id, childId); }
   @Post(['invitations', 'api/invitations'])
   @HttpCode(HttpStatus.CREATED)
   async createInvitation(

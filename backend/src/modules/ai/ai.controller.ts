@@ -1,5 +1,6 @@
 import {
   Controller,
+  UseGuards,
   Post,
   Get,
   Body,
@@ -7,11 +8,16 @@ import {
   HttpStatus,
   BadRequestException,
 } from '@nestjs/common';
+import { AiDebugGuard } from './ai-debug.guard';
+import { IsString, IsOptional, MaxLength, IsIn } from 'class-validator';
 import { AiService } from './ai.service';
 
 export class ExtractTestDto {
+  @IsString() @MaxLength(2000)
   text: string;
+  @IsOptional() @IsString() @MaxLength(80)
   childAlias?: string;
+  @IsOptional() @IsIn(['gemini', 'mock'])
   forceProvider?: 'gemini' | 'mock';
 }
 
@@ -26,6 +32,7 @@ export class AiController {
   }
 
   @Post('extract-test')
+  @UseGuards(AiDebugGuard)
   @HttpCode(HttpStatus.OK)
   async testExtract(@Body() body: ExtractTestDto) {
     if (!body?.text || typeof body.text !== 'string' || !body.text.trim()) {

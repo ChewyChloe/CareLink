@@ -69,7 +69,7 @@ describe('Flex Message Schema Structural Validation (flex-message.schema.spec)',
     expect(secondaryRow.layout).toBe('horizontal');
     expect(secondaryRow.contents).toHaveLength(2);
     expect(secondaryRow.contents[0].type).toBe('button');
-    expect(secondaryRow.contents[0].action.label).toBe('查看 / 修改');
+    expect(secondaryRow.contents[0].action.label).toBe('查看已保存紀錄');
     expect(secondaryRow.contents[1].type).toBe('button');
     expect(secondaryRow.contents[1].action.label).toBe('捨棄');
 
@@ -84,7 +84,7 @@ describe('Flex Message Schema Structural Validation (flex-message.schema.spec)',
     expect(serialized).toContain('配方奶');
     expect(serialized).toContain('13:10');
     expect(serialized).toContain('開始午睡');
-    expect(serialized).toContain('CareLink AI 已整理好，請家長確認內容。');
+    expect(serialized).toContain('草稿尚未成為照護紀錄，請核對後確認。');
   });
 
   it('should generate a valid Success Flex Bubble conforming to LINE Flex specification', () => {
